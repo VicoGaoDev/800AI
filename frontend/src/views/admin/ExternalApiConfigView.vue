@@ -158,6 +158,11 @@ const filteredConfigs = computed(() => (
     ? configs.value
     : configs.value.filter((item) => item.group_name === configGroupFilter.value)
 ));
+const filteredSceneBindings = computed(() => (
+  bindingGroupFilter.value === "all"
+    ? sceneBindings.value
+    : sceneBindings.value.filter((item) => (item.api_group_name || "未分组") === bindingGroupFilter.value)
+));
 const maskedGeminiKey = computed(() => {
   if (!geminiKey.value) return "";
   const value = geminiKey.value;
@@ -280,6 +285,10 @@ function isCopyableSceneType(
   sceneType: ExternalApiSceneType
 ): sceneType is Extract<ExternalApiSceneType, "generate" | "image_edit"> {
   return sceneType === "generate" || sceneType === "image_edit";
+}
+
+function canCopyScene(record: ExternalApiSceneBinding) {
+  return isCopyableSceneType(record.scene_type);
 }
 
 function fillSceneMetaForm(record: ExternalApiSceneBinding) {
@@ -857,7 +866,7 @@ function copySecret(value: string, label: string) {
         <a-table
           row-key="scene_key"
           :columns="bindingColumns"
-          :data-source="sceneBindings"
+          :data-source="filteredSceneBindings"
           :loading="loading"
           :pagination="false"
           :scroll="{ x: 1240 }"
@@ -939,8 +948,10 @@ function copySecret(value: string, label: string) {
               <span class="credit-unit">积分</span>
             </template>
             <template v-else-if="column.key === 'action'">
-              <a-space v-if="['generate', 'image_edit'].includes(record.scene_type)" wrap>
-                <a-button size="small" class="api-secondary-btn" :icon="h(CopyOutlined)" @click="openCopyScene(record)">复制新增</a-button>
+              <a-space wrap>
+                <a-button v-if="canCopyScene(record)" size="small" class="api-secondary-btn" :icon="h(CopyOutlined)" @click="openCopyScene(record)">
+                  复制新增
+                </a-button>
                 <a-button
                   v-if="!record.is_builtin"
                   size="small"
@@ -963,7 +974,6 @@ function copySecret(value: string, label: string) {
                   删除
                 </a-button>
               </a-space>
-              <span v-else class="scene-desc">该场景暂不支持复制</span>
             </template>
           </template>
         </a-table>

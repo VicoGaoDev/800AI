@@ -41,6 +41,26 @@ const dateRangeFilter = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 const generationModels = ref<GenerationModelOption[]>([]);
 const detailOpen = ref(false);
 const failedResultAsset = withBaseUrl("failed-result.svg");
+const expiredResultAsset = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="960" viewBox="0 0 960 960">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff8ee"/>
+      <stop offset="100%" stop-color="#ffe6c8"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="960" rx="56" fill="url(#bg)"/>
+  <rect x="74" y="74" width="812" height="812" rx="42" fill="none" stroke="#efc784" stroke-dasharray="18 16" stroke-width="10"/>
+  <g fill="none" stroke="#d08a24" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="282" y="248" width="396" height="286" rx="28" stroke-width="18"/>
+    <path d="M326 490l110-108 92 88 72-66 76 86" stroke-width="18"/>
+    <circle cx="400" cy="330" r="34" fill="#ffd585" stroke-width="12"/>
+  </g>
+  <text x="480" y="654" text-anchor="middle" font-size="54" font-weight="700" fill="#8c5a16">原图已过期</text>
+  <text x="480" y="726" text-anchor="middle" font-size="34" fill="#a9742e">服务器仅保留 15 天原图</text>
+  <text x="480" y="776" text-anchor="middle" font-size="34" fill="#a9742e">请在有效期内查看或下载</text>
+</svg>
+`)}`;
 const detailItem = ref<UserHistoryCard | null>(null);
 const selectedImageIds = ref<number[]>([]);
 const batchMode = ref(false);
@@ -241,6 +261,12 @@ function formatTime(t: string) {
   return t ? dayjs(t).format("YYYY-MM-DD HH:mm:ss") : "-";
 }
 
+function isHistoryItemExpired(item: Pick<UserHistoryCard, "created_at" | "status">) {
+  if (item.status !== "success") return false;
+  if (!item.created_at) return false;
+  return dayjs().diff(dayjs(item.created_at), "day", true) >= 15;
+}
+
 function getModelLabel(model?: string) {
   if (!model) return "-";
   return generationModels.value.find((item) => item.model_key === model)?.model_label || model;
@@ -312,6 +338,9 @@ function getHistoryImageSrc(image: Pick<UserHistoryCard, "thumb_url" | "image_ur
 }
 
 function getHistoryCardMedia(item: UserHistoryCard) {
+  if (isHistoryItemExpired(item)) {
+    return expiredResultAsset;
+  }
   if (item.mode === "promptReverse") {
     return resolveImageUrl(item.source_image_thumb || item.source_image);
   }
@@ -319,6 +348,9 @@ function getHistoryCardMedia(item: UserHistoryCard) {
 }
 
 function getHistoryCardPreview(item: UserHistoryCard) {
+  if (isHistoryItemExpired(item)) {
+    return "";
+  }
   if (item.mode === "promptReverse") {
     return resolveImageUrl(item.source_image);
   }
@@ -337,6 +369,20 @@ function getNestedPreviewSrc(image: Pick<ImageResult, "thumb_url" | "image_url" 
   return getPreviewImageUrl(image);
 }
 
+function getDetailImageSrc(item: UserHistoryCard, image: Pick<ImageResult, "thumb_url" | "image_url" | "preview_url" | "status">) {
+  if (isHistoryItemExpired(item) && image.status === "success") {
+    return expiredResultAsset;
+  }
+  return getNestedImageSrc(image);
+}
+
+function getDetailPreviewSrc(item: UserHistoryCard, image: Pick<ImageResult, "thumb_url" | "image_url" | "preview_url" | "status">) {
+  if (isHistoryItemExpired(item) && image.status === "success") {
+    return "";
+  }
+  return getNestedPreviewSrc(image);
+}
+
 function openDetail(item: UserHistoryCard) {
   detailItem.value = item;
   detailOpen.value = true;
@@ -353,6 +399,10 @@ function openFeedbackDialog(item: UserHistoryCard) {
 
 function canHistoryViewOriginal(item: UserHistoryCard) {
   return Boolean(getHistoryCardPreview(item));
+}
+
+function canEditHistoryImage(item: UserHistoryCard) {
+  return item.status !== "failed" && !isHistoryItemExpired(item);
 }
 
 function handleViewOriginal(item: UserHistoryCard) {
@@ -643,6 +693,10 @@ function handleReedit(item: UserHistoryCard) {
 }
 
 function handleEditImage(item: UserHistoryCard) {
+  if (!canEditHistoryImage(item)) {
+    message.warning(item.status === "failed" ? "失败任务暂不支持结果图编辑" : "该任务原图已过期，暂不支持结果图编辑");
+    return;
+  }
   const referenceImage = item.mode === "promptReverse"
     ? item.source_image
     : (item.image_url || item.preview_url || item.thumb_url || "");
@@ -863,7 +917,7 @@ function handleEditImage(item: UserHistoryCard) {
                   <template #icon><EyeOutlined /></template>
                 </a-button>
               </a-tooltip>
-              <a-tooltip title="结果图编辑">
+              <a-tooltip v-if="canEditHistoryImage(item)" title="结果图编辑">
                 <a-button shape="circle" type="text" class="history-overlay-btn" @click.stop="handleEditImage(item)">
                   <template #icon><EditOutlined /></template>
                 </a-button>
@@ -878,7 +932,7 @@ function handleEditImage(item: UserHistoryCard) {
                   shape="circle"
                   type="text"
                   class="history-overlay-btn"
-                  :disabled="!item.image_url || item.mode === 'promptReverse' || typeof item.image_id !== 'number'"
+                  :disabled="isHistoryItemExpired(item) || !item.image_url || item.mode === 'promptReverse' || typeof item.image_id !== 'number'"
                   @click.stop="typeof item.image_id === 'number' && download(item.image_id, item.image_url)"
                 >
                   <template #icon><DownloadOutlined /></template>
@@ -917,8 +971,15 @@ function handleEditImage(item: UserHistoryCard) {
             <div class="detail-section">
               <div v-if="detailItem.mode === 'promptReverse'" class="detail-label">反推原图</div>
               <div v-if="detailItem.mode === 'promptReverse' && detailItem.source_image" class="detail-thumb-row">
-                <div class="detail-thumb detail-thumb-large" @click="openPreview(resolveImageUrl(detailItem.source_image))">
-                  <img :src="resolveImageUrl(detailItem.source_image_thumb || detailItem.source_image)" alt="提示词反推原图" loading="lazy" />
+                <div
+                  class="detail-thumb detail-thumb-large"
+                  @click="!isHistoryItemExpired(detailItem) && openPreview(resolveImageUrl(detailItem.source_image))"
+                >
+                  <img
+                    :src="isHistoryItemExpired(detailItem) ? expiredResultAsset : resolveImageUrl(detailItem.source_image_thumb || detailItem.source_image)"
+                    alt="提示词反推原图"
+                    loading="lazy"
+                  />
                 </div>
               </div>
               <div v-else class="detail-result-grid">
@@ -928,14 +989,14 @@ function handleEditImage(item: UserHistoryCard) {
                   class="detail-result-card"
                   :class="{
                     single: detailItem.images.length === 1,
-                    pending: !getNestedImageSrc(img) && img.status !== 'failed',
+                    pending: !getDetailImageSrc(detailItem, img) && img.status !== 'failed',
                     failed: img.status === 'failed',
                   }"
-                  @click="getNestedPreviewSrc(img) && openPreview(getNestedPreviewSrc(img))"
+                  @click="getDetailPreviewSrc(detailItem, img) && openPreview(getDetailPreviewSrc(detailItem, img))"
                 >
                   <img
-                    v-if="getNestedImageSrc(img) || img.status === 'failed'"
-                    :src="getNestedImageSrc(img) || failedResultAsset"
+                    v-if="getDetailImageSrc(detailItem, img) || img.status === 'failed'"
+                    :src="getDetailImageSrc(detailItem, img) || failedResultAsset"
                     :alt="img.status === 'failed' ? '生成失败' : '结果图'"
                     :class="{ 'failed-result-image': img.status === 'failed' }"
                     loading="lazy"
@@ -960,8 +1021,12 @@ function handleEditImage(item: UserHistoryCard) {
             <div v-if="detailItem.mode === 'inpaint' && detailItem.source_image" class="detail-section">
               <div class="detail-label">局部重绘原图</div>
               <div class="detail-thumb-row">
-                <div class="detail-thumb" @click="openPreview(resolveImageUrl(detailItem.source_image))">
-                  <img :src="resolveImageUrl(detailItem.source_image_thumb || detailItem.source_image)" alt="局部重绘原图" loading="lazy" />
+                <div class="detail-thumb" @click="!isHistoryItemExpired(detailItem) && openPreview(resolveImageUrl(detailItem.source_image))">
+                  <img
+                    :src="isHistoryItemExpired(detailItem) ? expiredResultAsset : resolveImageUrl(detailItem.source_image_thumb || detailItem.source_image)"
+                    alt="局部重绘原图"
+                    loading="lazy"
+                  />
                 </div>
               </div>
             </div>
@@ -1004,7 +1069,7 @@ function handleEditImage(item: UserHistoryCard) {
               <a-button
                 type="text"
                 class="ghost-icon-btn detail-action-btn"
-                :disabled="!detailItem.image_url || typeof detailItem.image_id !== 'number'"
+                :disabled="isHistoryItemExpired(detailItem) || !detailItem.image_url || typeof detailItem.image_id !== 'number'"
                 @click="typeof detailItem.image_id === 'number' && download(detailItem.image_id, detailItem.image_url)"
               >
                 <template #icon><DownloadOutlined /></template>
