@@ -1955,12 +1955,12 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                           <template #icon><EyeOutlined /></template>
                         </a-button>
                       </a-tooltip>
-                      <a-tooltip title="图片编辑">
+                      <a-tooltip title="结果图编辑">
                         <a-button shape="circle" class="icon-chip" @click.stop="handleEditImageTask(item.task, item.image)">
                           <template #icon><EditOutlined /></template>
                         </a-button>
                       </a-tooltip>
-                      <a-tooltip title="重新编辑">
+                      <a-tooltip title="重新生成">
                         <a-button
                           shape="circle"
                           class="icon-chip"

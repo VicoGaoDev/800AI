@@ -863,12 +863,12 @@ function handleEditImage(item: UserHistoryCard) {
                   <template #icon><EyeOutlined /></template>
                 </a-button>
               </a-tooltip>
-              <a-tooltip title="图片编辑">
+              <a-tooltip title="结果图编辑">
                 <a-button shape="circle" type="text" class="history-overlay-btn" @click.stop="handleEditImage(item)">
                   <template #icon><EditOutlined /></template>
                 </a-button>
               </a-tooltip>
-              <a-tooltip title="重新编辑">
+              <a-tooltip title="重新生成">
                 <a-button shape="circle" type="text" class="history-overlay-btn" @click.stop="handleReedit(item)">
                   <template #icon><ReloadOutlined /></template>
                 </a-button>
