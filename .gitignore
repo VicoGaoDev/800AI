@@ -36,3 +36,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# gptimage2 提示词参考图片
+gptimage2-prompt/data/images/

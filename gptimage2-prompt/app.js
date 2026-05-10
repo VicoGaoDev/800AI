@@ -11,12 +11,13 @@ const allCases = [...casesData.cases].sort((left, right) => {
   }
   return right.id - left.id;
 });
+const initialFilterState = readFilterStateFromUrl();
 
 const state = {
   search: "",
-  style: "all",
-  category: "all",
-  scene: "all",
+  style: initialFilterState.style,
+  category: initialFilterState.category,
+  scene: initialFilterState.scene,
   sidebarCollapsed: readSidebarPreference(),
   mobileDrawerOpen: false,
   mobileSearchOpen: false,
@@ -32,6 +33,7 @@ const elements = {
   mobileFloatingActions: document.querySelector(".mobile-floating-actions"),
   searchInput: document.querySelector("#search-input"),
   resetFilters: document.querySelector("#reset-filters"),
+  applyFilters: document.querySelector("#apply-filters"),
   controlPanel: document.querySelector(".control-panel"),
   sidebar: document.querySelector("#style-sidebar"),
   sidebarDrawerBackdrop: document.querySelector("#sidebar-drawer-backdrop"),
@@ -70,10 +72,11 @@ renderResults();
 applySidebarState();
 applySectionStates();
 bindEvents();
+syncFilterStateToUrl();
 
 function bindEvents() {
-  elements.searchInput.addEventListener("input", (event) => {
-    state.search = event.target.value.trim();
+  elements.applyFilters.addEventListener("click", () => {
+    state.search = elements.searchInput.value.trim();
     renderResults();
   });
 
@@ -83,6 +86,24 @@ function bindEvents() {
     state.category = "all";
     state.scene = "all";
     elements.searchInput.value = "";
+    syncFilterStateToUrl();
+    renderFilters();
+    renderResults();
+  });
+
+  elements.resultsMeta.addEventListener("click", (event) => {
+    const clearButton = event.target.closest("[data-clear-filter]");
+    if (!clearButton) {
+      return;
+    }
+
+    const filterKey = clearButton.dataset.clearFilter;
+    if (!["style", "category", "scene"].includes(filterKey)) {
+      return;
+    }
+
+    state[filterKey] = "all";
+    syncFilterStateToUrl();
     renderFilters();
     renderResults();
   });
@@ -226,6 +247,15 @@ function bindEvents() {
     applySidebarState();
   });
 
+  window.addEventListener("popstate", () => {
+    const nextFilterState = readFilterStateFromUrl();
+    state.style = nextFilterState.style;
+    state.category = nextFilterState.category;
+    state.scene = nextFilterState.scene;
+    renderFilters();
+    renderResults();
+  });
+
   elements.copyPrompt.addEventListener("click", async () => {
     if (!activeCase) {
       return;
@@ -281,6 +311,7 @@ function renderFilters() {
     ],
     onSelect(value) {
       state.style = value;
+      syncFilterStateToUrl();
       renderFilters();
       renderResults();
     },
@@ -299,6 +330,7 @@ function renderFilters() {
     ],
     onSelect(value) {
       state.category = value;
+      syncFilterStateToUrl();
       renderFilters();
       renderResults();
     },
@@ -317,6 +349,7 @@ function renderFilters() {
     ],
     onSelect(value) {
       state.scene = value;
+      syncFilterStateToUrl();
       renderFilters();
       renderResults();
     },
@@ -344,7 +377,8 @@ function renderSidebarMenu({ container, options, activeValue, onSelect }) {
 
   container.querySelectorAll("[data-filter-value]").forEach((button) => {
     button.addEventListener("click", () => {
-      onSelect(button.dataset.filterValue);
+      const nextValue = button.dataset.filterValue === activeValue ? "all" : button.dataset.filterValue;
+      onSelect(nextValue);
       if (isDrawerViewport()) {
         state.mobileDrawerOpen = false;
         state.mobileSearchOpen = false;
@@ -417,16 +451,21 @@ function renderResults() {
   const styleLabel = getStyleLabel(state.style);
   const categoryLabel = getCategoryLabel(state.category);
   const sceneLabel = getSceneLabel(state.scene);
-  const searchLabel = state.search ? `搜索 “${state.search}”` : "全部关键词";
-
   elements.styleSummary.textContent =
     state.style === "all"
       ? "已按 style-library 风格标签构建筛选"
       : `当前风格：${styleLabel}`;
 
-  elements.resultsTitle.textContent =
-    state.style === "all" ? "全部案例" : `${styleLabel} 风格案例`;
-  elements.resultsMeta.textContent = `共 ${filteredCases.length} 条结果 · ${categoryLabel} · ${sceneLabel} · ${searchLabel}`;
+  const hasActiveFilters =
+    state.style !== "all" || state.category !== "all" || state.scene !== "all" || Boolean(state.search);
+
+  elements.resultsTitle.textContent = hasActiveFilters ? `共 ${filteredCases.length} 条结果` : "全部案例";
+  elements.resultsMeta.innerHTML = renderResultsMeta({
+    styleLabel,
+    categoryLabel,
+    sceneLabel,
+    searchLabel: state.search ? `搜索 “${state.search}”` : "",
+  });
 
   if (!filteredCases.length) {
     elements.resultsGrid.innerHTML = `
@@ -446,7 +485,6 @@ function renderResults() {
         <article class="case-card" data-case-id="${item.id}">
           <div class="case-image-wrap">
             <img src="${escapeAttribute(resolveAssetPath(item.image))}" alt="${escapeAttribute(item.imageAlt || item.title)}" loading="lazy" />
-            ${item.featured ? '<span class="featured-badge">Featured</span>' : ""}
             <span class="case-badge">#${item.id}</span>
           </div>
           <div class="case-body">
@@ -638,6 +676,73 @@ function getShortLabel(label) {
   }
   const compact = normalized.replaceAll(/\s+/g, "");
   return compact.length <= 4 ? compact : compact.slice(0, 4);
+}
+
+function renderResultsMeta({ styleLabel, categoryLabel, sceneLabel, searchLabel }) {
+  const parts = [
+    renderResultsMetaItem({ key: "style", label: styleLabel, isActive: state.style !== "all" }),
+    renderResultsMetaItem({ key: "category", label: categoryLabel, isActive: state.category !== "all" }),
+    renderResultsMetaItem({ key: "scene", label: sceneLabel, isActive: state.scene !== "all" }),
+  ];
+
+  if (searchLabel) {
+    parts.push(`<span class="results-meta-item">${escapeHtml(searchLabel)}</span>`);
+  }
+
+  return parts.join('<span class="results-meta-separator">·</span>');
+}
+
+function renderResultsMetaItem({ key, label, isActive }) {
+  if (!isActive) {
+    return `<span class="results-meta-item">${escapeHtml(label)}</span>`;
+  }
+
+  return `
+    <button type="button" class="results-meta-clear" data-clear-filter="${escapeAttribute(key)}">
+      <span>${escapeHtml(label)}</span>
+      <span class="results-meta-clear-icon" aria-hidden="true">×</span>
+    </button>
+  `;
+}
+
+function readFilterStateFromUrl() {
+  const searchParams = new URLSearchParams(window.location.search);
+
+  return {
+    style: getValidUrlFilterValue(searchParams.get("style"), styleLibrary.styles.map((item) => item.value)),
+    category: getValidUrlFilterValue(
+      searchParams.get("category"),
+      styleLibrary.categories.map((item) => item.value)
+    ),
+    scene: getValidUrlFilterValue(searchParams.get("scene"), styleLibrary.scenes.map((item) => item.value)),
+  };
+}
+
+function getValidUrlFilterValue(value, allowedValues) {
+  if (!value || value === "all") {
+    return "all";
+  }
+
+  return allowedValues.includes(value) ? value : "all";
+}
+
+function syncFilterStateToUrl() {
+  const url = new URL(window.location.href);
+
+  updateUrlFilterParam(url.searchParams, "style", state.style);
+  updateUrlFilterParam(url.searchParams, "category", state.category);
+  updateUrlFilterParam(url.searchParams, "scene", state.scene);
+
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function updateUrlFilterParam(searchParams, key, value) {
+  if (!value || value === "all") {
+    searchParams.delete(key);
+    return;
+  }
+
+  searchParams.set(key, value);
 }
 
 function isDrawerViewport() {
