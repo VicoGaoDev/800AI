@@ -1229,18 +1229,36 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
 }
 
 .app-content {
+  position: relative;
   padding: 22px 24px 28px;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 132px;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(var(--theme-surface-strong-rgb), 0.72) 0%,
+      rgba(var(--theme-surface-strong-rgb), 0.46) 34%,
+      rgba(var(--theme-page-base-rgb), 0) 100%
+    );
+  }
 }
 
 .content-inner {
   max-width: 1400px;
   margin: 0 auto;
   position: relative;
+  z-index: 1;
 }
 
 .route-page-shell {
   min-width: 0;
-  background: var(--theme-page-base);
+  background: transparent;
   border-radius: 0;
 }
 
