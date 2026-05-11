@@ -113,6 +113,12 @@ function bindEvents() {
   });
 
   elements.heroStats.addEventListener("click", (event) => {
+    const sectionButton = event.target.closest("[data-stat-section]");
+    if (sectionButton) {
+      openSidebarSection(sectionButton.dataset.statSection);
+      return;
+    }
+
     const statButton = event.target.closest("[data-stat-filter]");
     if (!statButton || statButton.dataset.statFilter !== "featured") {
       return;
@@ -284,23 +290,37 @@ function bindEvents() {
 }
 
 function renderHeroStats() {
+  const totalCases = casesData.totalCases ?? allCases.length;
+  const featuredCount = allCases.filter((item) => item.featured).length;
+
   const stats = [
     {
       label: "条提示词",
-      value: casesData.totalCases ?? allCases.length,
+      value: totalCases,
     },
     {
       label: "个风格标签",
       value: styleLibrary.styles.length,
+      key: "styles",
+      action: "section",
     },
     {
-      label: "张效果图",
-      value: allCases.filter((item) => item.image).length,
+      label: "个分类",
+      value: styleLibrary.categories.length,
+      key: "categories",
+      action: "section",
+    },
+    {
+      label: "个场景",
+      value: styleLibrary.scenes.length,
+      key: "scenes",
+      action: "section",
     },
     {
       label: "条精选案例",
-      value: allCases.filter((item) => item.featured).length,
+      value: featuredCount,
       key: "featured",
+      action: "filter",
       active: state.featured,
     },
   ];
@@ -308,16 +328,49 @@ function renderHeroStats() {
   elements.heroStats.innerHTML = stats
     .map(
       (stat) => `
-        <${stat.key ? "button" : "article"}
-          ${stat.key ? `type="button" data-stat-filter="${escapeAttribute(stat.key)}"` : ""}
+        <${stat.action ? "button" : "article"}
+          ${
+            stat.action === "filter"
+              ? `type="button" data-stat-filter="${escapeAttribute(stat.key)}"`
+              : stat.action === "section"
+                ? `type="button" data-stat-section="${escapeAttribute(stat.key)}"`
+                : ""
+          }
           class="stat-card ${stat.key ? "stat-card-button" : ""} ${stat.active ? "active" : ""}"
         >
           <span class="stat-value">${stat.value}</span>
           <span class="stat-label">${stat.label}</span>
-        </${stat.key ? "button" : "article"}>
+        </${stat.action ? "button" : "article"}>
       `
     )
     .join("");
+}
+
+function openSidebarSection(sectionKey) {
+  if (!["styles", "categories", "scenes"].includes(sectionKey)) {
+    return;
+  }
+
+  if (isDrawerViewport()) {
+    state.mobileDrawerOpen = true;
+    state.mobileSearchOpen = false;
+  } else if (state.sidebarCollapsed) {
+    state.sidebarCollapsed = false;
+    writeSidebarPreference(false);
+  }
+
+  state.sections = {
+    styles: false,
+    categories: false,
+    scenes: false,
+    [sectionKey]: true,
+  };
+  writeSectionPreferences(state.sections);
+  applySidebarState();
+  applySectionStates();
+
+  const targetSection = document.querySelector(`.sidebar-section[data-section="${sectionKey}"]`);
+  targetSection?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderFilters() {
@@ -492,14 +545,7 @@ function renderResults() {
       ? "已按 style-library 风格标签构建筛选"
       : `当前风格：${styleLabel}`;
 
-  const hasActiveFilters =
-    state.style !== "all" ||
-    state.category !== "all" ||
-    state.scene !== "all" ||
-    state.featured ||
-    Boolean(state.search);
-
-  elements.resultsTitle.textContent = hasActiveFilters ? `共 ${filteredCases.length} 条结果` : "全部案例";
+  elements.resultsTitle.textContent = `共 ${filteredCases.length} 条结果`;
   elements.resultsMeta.innerHTML = renderResultsMeta({
     styleLabel,
     categoryLabel,

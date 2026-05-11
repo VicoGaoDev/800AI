@@ -137,7 +137,8 @@ a {
 }
 
 .stat-card-button.active .stat-label,
-.stat-card-button.active .stat-value {
+.stat-card-button.active .stat-value,
+.stat-card-button.active .stat-hint {
   color: #523713;
 }
 
@@ -153,6 +154,14 @@ a {
   margin-top: 8px;
   color: var(--text-soft);
   font-size: 13px;
+}
+
+.stat-hint {
+  display: block;
+  margin-top: 6px;
+  color: #b8883f;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .hero-visual {
@@ -176,7 +185,7 @@ a {
 .main-layout {
   display: grid;
   grid-template-columns: 468px minmax(0, 1fr);
-  gap: 22px;
+  gap: 18px;
   align-items: start;
   transition: grid-template-columns 0.22s ease, gap 0.22s ease;
 }
@@ -194,7 +203,7 @@ a {
 .content-panel {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 .sidebar-panel,
@@ -211,13 +220,13 @@ a {
   position: sticky;
   top: 16px;
   z-index: 10;
-  padding: 18px;
+  padding: 14px;
   border-radius: var(--radius-xl);
   backdrop-filter: blur(18px);
 }
 
 .search-summary-card {
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .search-summary-bar {
@@ -237,10 +246,10 @@ a {
   z-index: 11;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   height: calc(100vh - 32px);
   max-height: calc(100vh - 32px);
-  padding: 20px 16px 18px;
+  padding: 18px 14px 16px;
   border-radius: var(--radius-xl);
   backdrop-filter: blur(18px);
   overflow: hidden;
@@ -292,24 +301,24 @@ a {
 
 .sidebar-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .sidebar-panel .stat-card {
   min-width: 0;
-  padding: 10px 10px 8px;
-  border-radius: 12px;
+  padding: 9px 9px 7px;
+  border-radius: 11px;
 }
 
 .sidebar-panel .stat-value {
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .sidebar-panel .stat-label {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 3px;
+  font-size: 10px;
 }
 
 .visually-hidden {
@@ -336,9 +345,9 @@ a {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: 1px solid rgba(255, 171, 36, 0.32);
-  border-radius: 24px;
+  border-radius: 20px;
   background: #fffdf8;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
@@ -350,7 +359,7 @@ a {
 }
 
 .sidebar-section + .sidebar-section {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .sidebar-section[data-section="styles"] {
@@ -361,10 +370,10 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   margin: 0;
-  padding: 6px 4px;
+  padding: 4px 2px;
   border: 0;
   border-radius: 0;
   color: #5b3a10;
@@ -377,7 +386,7 @@ a {
   display: flex;
   min-width: 0;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 
 .sidebar-section-title {
@@ -554,18 +563,18 @@ a {
 
 .search-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 
 .search-input {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
-  padding: 11px 14px;
+  padding: 10px 12px;
   border: 1px solid #efdcb9;
-  border-radius: 16px;
+  border-radius: 14px;
   background: #fffdf8;
 }
 
@@ -589,9 +598,9 @@ a {
 
 .ghost-button {
   min-width: 78px;
-  padding: 10px 18px;
+  padding: 9px 16px;
   border: 1px solid rgba(255, 171, 36, 0.32);
-  border-radius: 14px;
+  border-radius: 13px;
   color: #9d8160;
   background: #fffdf8;
   cursor: pointer;
@@ -606,9 +615,9 @@ a {
 
 .apply-filter-button {
   min-width: 78px;
-  padding: 10px 20px;
+  padding: 9px 18px;
   border: 0 solid transparent;
-  border-radius: 14px;
+  border-radius: 13px;
   color: #523713;
   background: rgb(255, 171, 36);
   cursor: pointer;
@@ -723,7 +732,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
   min-width: 280px;
   margin-left: auto;
@@ -740,7 +749,7 @@ a {
 }
 
 .compact-results-header h2 {
-  font-size: 16px;
+  font-size: 15px;
   white-space: nowrap;
 }
 
@@ -749,7 +758,7 @@ a {
   margin-left: auto;
   max-width: none;
   text-align: right;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .eyebrow {
@@ -766,7 +775,7 @@ a {
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .results-meta-item,
@@ -802,8 +811,8 @@ a {
 .results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 18px;
-  margin-top: 20px;
+  gap: 14px;
+  margin-top: 16px;
 }
 
 @media (min-width: 1121px) {
@@ -829,14 +838,14 @@ a {
 
 .case-card {
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: 20px;
   cursor: pointer;
   transition: transform 0.18s ease, border-color 0.18s ease;
 }
 
 .case-card:hover {
-  transform: translateY(-3px);
-  border-color: rgba(116, 163, 255, 0.34);
+  transform: translateY(-2px);
+  border-color: rgba(255, 171, 36, 0.4);
 }
 
 .case-image-wrap {
@@ -869,17 +878,17 @@ a {
 }
 
 .case-body {
-  padding: 18px;
+  padding: 14px;
 }
 
 .case-category {
   display: inline-flex;
   align-items: center;
-  padding: 6px 12px;
-  border-radius: 12px;
+  padding: 5px 10px;
+  border-radius: 10px;
   background: rgba(255, 214, 140, 0.28);
   color: #b26c04;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -887,8 +896,8 @@ a {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .card-copy-button {
@@ -896,10 +905,10 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border: 1px solid #efdcb9;
-  border-radius: 10px;
+  border-radius: 9px;
   color: #b26c04;
   background: #fffdf8;
   cursor: pointer;
@@ -919,14 +928,14 @@ a {
 
 .case-title {
   margin: 0;
-  font-size: 20px;
-  line-height: 1.2;
+  font-size: 18px;
+  line-height: 1.18;
 }
 
 .case-preview {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--text-soft);
-  font-size: 14px;
+  font-size: 13px;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
@@ -936,16 +945,16 @@ a {
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .tag {
-  padding: 7px 10px;
+  padding: 6px 9px;
   border-radius: 999px;
   background: rgba(255, 247, 232, 0.92);
   color: #8c7458;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .tag.scene {
