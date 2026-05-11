@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { message } from "ant-design-vue";
-import { PictureOutlined, ThunderboltOutlined } from "@ant-design/icons-vue";
+import { AppstoreOutlined, PictureOutlined, ThunderboltOutlined } from "@ant-design/icons-vue";
 import { useRouter } from "vue-router";
 import { getGenerationModels } from "@/api/config";
 import { getTemplateDetail, listTemplates, listTemplateTags } from "@/api/templates";
@@ -174,10 +174,21 @@ watch(loadMoreAnchor, (target) => {
           <div class="warm-page-desc">浏览灵感案例，选择喜欢的模版后再进入编辑生成。</div>
         </div>
       </div>
-      <a-button type="primary" class="warm-primary-btn" @click="router.push('/generate')">
-        <template #icon><ThunderboltOutlined /></template>
-        自定义绘图
-      </a-button>
+      <div class="templates-topbar-actions">
+        <a-button
+          class="template-guide-btn"
+          href="https://80ai.net/gptimage2-prompt"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <template #icon><AppstoreOutlined /></template>
+          模版大全
+        </a-button>
+        <a-button type="primary" class="warm-primary-btn" @click="router.push('/generate')">
+          <template #icon><ThunderboltOutlined /></template>
+          自定义绘图
+        </a-button>
+      </div>
     </div>
 
     <div class="tag-filter">
@@ -328,6 +339,54 @@ watch(loadMoreAnchor, (target) => {
 .templates-topbar .warm-page-desc {
   font-size: 13px;
   line-height: 1.6;
+}
+
+.templates-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+:deep(.template-guide-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding-inline: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--theme-panel-border-strong) !important;
+  background: linear-gradient(180deg, var(--theme-panel-bg), var(--theme-panel-bg-strong)) !important;
+  color: var(--theme-accent-text) !important;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 10px 22px var(--theme-card-shadow);
+  transition:
+    transform var(--motion-duration-press) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-base) var(--motion-ease-soft),
+    background var(--motion-duration-base) var(--motion-ease-soft),
+    border-color var(--motion-duration-base) var(--motion-ease-soft),
+    color var(--motion-duration-base) var(--motion-ease-soft);
+}
+
+:deep(.template-guide-btn .ant-btn-icon),
+:deep(.template-guide-btn > span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:deep(.template-guide-btn:hover),
+:deep(.template-guide-btn:focus) {
+  color: var(--theme-accent-text-hover) !important;
+  border-color: var(--theme-border-strong) !important;
+  background: linear-gradient(180deg, var(--theme-panel-bg-soft), var(--theme-panel-bg-strong)) !important;
+  transform: translateY(-1px);
+}
+
+:deep(.template-guide-btn:active) {
+  transform: scale(0.96);
 }
 
 .tag-filter {
@@ -821,6 +880,10 @@ watch(loadMoreAnchor, (target) => {
   .templates-topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .templates-topbar-actions {
+    width: 100%;
   }
 }
 

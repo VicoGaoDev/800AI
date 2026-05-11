@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     MAX_ACTIVE_TASKS_GLOBAL: int = 500
 
     AI_API_URL: str = "https://nanoapi.poloai.top/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
-    AI_TIMEOUT: int = 300
+    AI_TIMEOUT: int = 600
     PROCESSING_TASK_TIMEOUT_SECONDS: int = 600
     COS_STS_DURATION_SECONDS: int = 1800
     IMAGE_FETCH_TIMEOUT: int = 30
