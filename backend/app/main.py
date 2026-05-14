@@ -440,7 +440,9 @@ def _ensure_user_credit_schema():
                         id INTEGER NOT NULL AUTO_INCREMENT,
                         user_id INTEGER NOT NULL,
                         type INTEGER NOT NULL DEFAULT 0,
-                        balance INTEGER NOT NULL DEFAULT 0,
+                        remain_credit INTEGER NOT NULL DEFAULT 0,
+                        used_credit INTEGER NOT NULL DEFAULT 0,
+                        status TINYINT(1) NOT NULL DEFAULT 1,
                         expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -458,13 +460,88 @@ def _ensure_user_credit_schema():
     user_credit_columns = {col["name"] for col in inspector.get_columns("user_credits")}
     user_columns = {col["name"] for col in inspector.get_columns("users")}
     with engine.begin() as conn:
+        if "remain_credit" not in user_credit_columns and "balance" in user_credit_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_credits
+                    CHANGE COLUMN balance remain_credit INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+            )
+            inspector = inspect(engine)
+            user_credit_columns = {col["name"] for col in inspector.get_columns("user_credits")}
+        if "used_credit" not in user_credit_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_credits
+                    ADD COLUMN used_credit INTEGER NOT NULL DEFAULT 0
+                    AFTER remain_credit
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE user_credits uc
+                    LEFT JOIN (
+                        SELECT user_id, COALESCE(SUM(ABS(amount)), 0) AS total_used_credit
+                        FROM credit_logs
+                        WHERE type = 'consume'
+                        GROUP BY user_id
+                    ) cl ON cl.user_id = uc.user_id
+                    SET uc.used_credit = COALESCE(cl.total_used_credit, 0)
+                    WHERE uc.type = 0
+                    """
+                )
+            )
+            inspector = inspect(engine)
+            user_credit_columns = {col["name"] for col in inspector.get_columns("user_credits")}
+        if "status" not in user_credit_columns:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_credits
+                    ADD COLUMN status TINYINT(1) NOT NULL DEFAULT 1
+                    AFTER used_credit
+                    """
+                )
+            )
+            conn.execute(text("UPDATE user_credits SET status = 1 WHERE status IS NULL"))
+            inspector = inspect(engine)
+            user_credit_columns = {col["name"] for col in inspector.get_columns("user_credits")}
+        user_credit_status_type = next(
+            (str(col["type"]) for col in inspector.get_columns("user_credits") if col["name"] == "status"),
+            "",
+        ).lower()
+        if "varchar" in user_credit_status_type or "char" in user_credit_status_type:
+            conn.execute(
+                text(
+                    """
+                    UPDATE user_credits
+                    SET status = CASE
+                        WHEN status IN ('enabled', '1', 'true', 'TRUE') THEN 1
+                        ELSE 0
+                    END
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE user_credits
+                    MODIFY COLUMN status TINYINT(1) NOT NULL DEFAULT 1
+                    """
+                )
+            )
         if "expire_time" not in user_credit_columns:
             conn.execute(
                 text(
                     """
                     ALTER TABLE user_credits
                     ADD COLUMN expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59'
-                    AFTER balance
+                    AFTER status
                     """
                 )
             )
@@ -481,8 +558,8 @@ def _ensure_user_credit_schema():
             conn.execute(
                 text(
                     """
-                    INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
-                    SELECT users.id, 0, COALESCE(users.credits, 0), '2027-12-30 23:59:59', NOW(), NOW()
+                    INSERT INTO user_credits (user_id, type, remain_credit, used_credit, status, expire_time, created_at, updated_at)
+                    SELECT users.id, 0, COALESCE(users.credits, 0), 0, 1, '2027-12-30 23:59:59', NOW(), NOW()
                     FROM users
                     LEFT JOIN user_credits
                       ON user_credits.user_id = users.id
@@ -495,8 +572,8 @@ def _ensure_user_credit_schema():
             conn.execute(
                 text(
                     """
-                    INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
-                    SELECT users.id, 0, 0, '2027-12-30 23:59:59', NOW(), NOW()
+                    INSERT INTO user_credits (user_id, type, remain_credit, used_credit, status, expire_time, created_at, updated_at)
+                    SELECT users.id, 0, 0, 0, 1, '2027-12-30 23:59:59', NOW(), NOW()
                     FROM users
                     LEFT JOIN user_credits
                       ON user_credits.user_id = users.id

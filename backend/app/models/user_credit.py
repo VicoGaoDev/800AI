@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 DEFAULT_CREDIT_EXPIRE_AT = datetime(2027, 12, 30, 23, 59, 59)
+DEFAULT_USER_CREDIT_STATUS = 1
 
 
 class UserCredit(Base):
@@ -17,7 +18,15 @@ class UserCredit(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     type = Column(Integer, nullable=False, default=0, server_default="0", index=True)
-    balance = Column(Integer, nullable=False, default=0, server_default="0")
+    remain_credit = Column(Integer, nullable=False, default=0, server_default="0")
+    used_credit = Column(Integer, nullable=False, default=0, server_default="0")
+    status = Column(
+        Integer,
+        nullable=False,
+        default=DEFAULT_USER_CREDIT_STATUS,
+        server_default="1",
+        index=True,
+    )
     expire_time = Column(
         DateTime,
         nullable=False,

@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.models.credit_log import CreditLog
 from app.models.user import User
-from app.models.user_credit import DEFAULT_CREDIT_EXPIRE_AT, UserCredit
+from app.models.user_credit import (
+    DEFAULT_CREDIT_EXPIRE_AT,
+    DEFAULT_USER_CREDIT_STATUS,
+    UserCredit,
+)
 
 DEFAULT_CREDIT_TYPE = 0
 
@@ -15,7 +19,7 @@ def ensure_user_credit_account(
     user_id: int,
     *,
     credit_type: int = DEFAULT_CREDIT_TYPE,
-    balance: int = 0,
+    remain_credit: int = 0,
 ) -> UserCredit:
     account = (
         db.query(UserCredit)
@@ -27,7 +31,9 @@ def ensure_user_credit_account(
     account = UserCredit(
         user_id=user_id,
         type=credit_type,
-        balance=balance,
+        remain_credit=remain_credit,
+        used_credit=0,
+        status=DEFAULT_USER_CREDIT_STATUS,
         expire_time=DEFAULT_CREDIT_EXPIRE_AT,
     )
     db.add(account)
@@ -76,7 +82,9 @@ def get_user_credit_balance(
         credit_type=credit_type,
         create_if_missing=False,
     )
-    return int(account.balance if account else 0)
+    if not account or account.status != DEFAULT_USER_CREDIT_STATUS:
+        return 0
+    return int(account.remain_credit or 0)
 
 
 def get_user_credits_map(
@@ -93,7 +101,12 @@ def get_user_credits_map(
         .filter(UserCredit.user_id.in_(normalized_ids), UserCredit.type == credit_type)
         .all()
     )
-    balance_map = {row.user_id: int(row.balance or 0) for row in rows}
+    balance_map = {
+        row.user_id: int(row.remain_credit or 0)
+        if row.status == DEFAULT_USER_CREDIT_STATUS
+        else 0
+        for row in rows
+    }
     for user_id in normalized_ids:
         balance_map.setdefault(user_id, 0)
     return balance_map
@@ -115,12 +128,19 @@ def apply_user_credit_delta(
     )
     if account is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="积分账户不存在")
+    if account.status != DEFAULT_USER_CREDIT_STATUS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前积分账户不可用")
 
-    next_balance = int(account.balance or 0) + int(delta)
-    if not allow_negative and next_balance < 0:
+    next_remain_credit = int(account.remain_credit or 0) + int(delta)
+    next_used_credit = int(account.used_credit or 0)
+    if int(delta) < 0:
+        next_used_credit += abs(int(delta))
+
+    if not allow_negative and next_remain_credit < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="扣减后积分不能为负数")
 
-    account.balance = next_balance
+    account.remain_credit = next_remain_credit
+    account.used_credit = next_used_credit
     db.add(account)
     db.flush()
     return account
@@ -159,10 +179,10 @@ def change_user_credit_balance(
     return account
 
 
-def create_default_credit_account(db: Session, user: User, *, balance: int = 0) -> UserCredit:
+def create_default_credit_account(db: Session, user: User, *, remain_credit: int = 0) -> UserCredit:
     return ensure_user_credit_account(
         db,
         user.id,
         credit_type=DEFAULT_CREDIT_TYPE,
-        balance=balance,
+        remain_credit=remain_credit,
     )

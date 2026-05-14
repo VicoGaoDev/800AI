@@ -179,7 +179,7 @@ def create_tasks(
                 detail="用户不存在",
             )
         credit_account = get_user_credit_account(db, user.id, for_update=True)
-        current_balance = int(credit_account.balance or 0) if credit_account else 0
+        current_balance = int(credit_account.remain_credit or 0) if credit_account else 0
         scene_key = SCENE_INPAINT if mode == "inpaint" else model.strip()
         task_logger.info(
             "task submission accepted",
@@ -207,7 +207,8 @@ def create_tasks(
         ref_json = json.dumps(reference_images or [])
 
         if actual_total_cost:
-            credit_account.balance = current_balance - total_cost
+            credit_account.remain_credit = current_balance - total_cost
+            credit_account.used_credit = int(credit_account.used_credit or 0) + total_cost
             db.add(credit_account)
 
         normalized_prompt = prompt.strip()

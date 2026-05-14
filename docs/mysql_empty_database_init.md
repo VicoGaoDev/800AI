@@ -34,7 +34,9 @@
 - `id`: 积分账户主键。
 - `user_id`: 归属用户。
 - `type`: 积分类型；当前默认使用 `0`，便于后续扩展其他余额类型。
-- `balance`: 当前积分余额快照。
+- `remain_credit`: 当前剩余积分。
+- `used_credit`: 已使用积分累计值；历史数据可按 `credit_logs` 中 `type = 'consume'` 的消费流水聚合回填。
+- `status`: 积分账户状态；`1` 表示可用，`0` 表示不可用，默认值为 `1`。
 - `expire_time`: 积分过期时间；当前默认值为 `2027-12-30 23:59:59`。
 - `created_at` / `updated_at`: 账户创建时间、最后更新时间。
 - 使用联合唯一约束 `(user_id, type)` 保证同一用户同一积分类型只有一条余额记录。
@@ -383,7 +385,9 @@ CREATE TABLE user_credits (
   id INT NOT NULL AUTO_INCREMENT,
   user_id INT NOT NULL,
   type INT NOT NULL DEFAULT 0,
-  balance INT NOT NULL DEFAULT 0,
+  remain_credit INT NOT NULL DEFAULT 0,
+  used_credit INT NOT NULL DEFAULT 0,
+  status TINYINT(1) NOT NULL DEFAULT 1,
   expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -582,8 +586,8 @@ INSERT INTO users (
 ('11111111111111111111111111111111', 'administrator', NULL, 0, '$2b$12$CR1qnIGjLbi46hgFXXrxQOoPge5g0aWWuLga1fWGDC5GOBiIFY0vK', '', 'superadmin', 'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
 ('22222222222222222222222222222222', 'admin', NULL, 0, '$2b$12$gGceM8aYPCpT9Kz0GJQvje0cvIS5y6HEFrXTGyeu4AzNbD7ANX..C', '', 'admin', 'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
-INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
-SELECT id, 0, 0, '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO user_credits (user_id, type, remain_credit, used_credit, status, expire_time, created_at, updated_at)
+SELECT id, 0, 0, 0, 1, '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM users
 WHERE business_id IN (
   '11111111111111111111111111111111',
@@ -611,6 +615,13 @@ WHERE TABLE_SCHEMA = DATABASE()
   AND COLUMN_NAME = 'credits';
 
 SHOW TABLES LIKE 'user_credits';
+
+SELECT COLUMN_NAME
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'user_credits'
+  AND COLUMN_NAME IN ('balance', 'remain_credit', 'used_credit', 'status', 'expire_time')
+ORDER BY COLUMN_NAME;
 ```
 
 ### 2. 积分余额拆表 SQL
@@ -622,7 +633,9 @@ CREATE TABLE IF NOT EXISTS user_credits (
   id INT NOT NULL AUTO_INCREMENT,
   user_id INT NOT NULL,
   type INT NOT NULL DEFAULT 0,
-  balance INT NOT NULL DEFAULT 0,
+  remain_credit INT NOT NULL DEFAULT 0,
+  used_credit INT NOT NULL DEFAULT 0,
+  status TINYINT(1) NOT NULL DEFAULT 1,
   expire_time DATETIME NOT NULL DEFAULT '2027-12-30 23:59:59',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -632,9 +645,36 @@ CREATE TABLE IF NOT EXISTS user_credits (
   KEY ix_user_credits_type (type),
   CONSTRAINT fk_user_credits_user FOREIGN KEY (user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
 
-INSERT INTO user_credits (user_id, type, balance, expire_time, created_at, updated_at)
-SELECT u.id, 0, COALESCE(u.credits, 0), '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+如果你的生产库里 `user_credits` 还是旧结构，仍然保留 `balance` 字段且缺少 `used_credit` / `status`，再继续执行下面这组兼容 SQL：
+
+```sql
+ALTER TABLE user_credits
+  CHANGE COLUMN balance remain_credit INT NOT NULL DEFAULT 0;
+
+ALTER TABLE user_credits
+  ADD COLUMN used_credit INT NOT NULL DEFAULT 0 AFTER remain_credit;
+
+ALTER TABLE user_credits
+  ADD COLUMN status TINYINT(1) NOT NULL DEFAULT 1 AFTER used_credit;
+
+UPDATE user_credits
+LEFT JOIN (
+  SELECT user_id, COALESCE(SUM(ABS(amount)), 0) AS total_used_credit
+  FROM credit_logs
+  WHERE type = 'consume'
+  GROUP BY user_id
+) cl ON cl.user_id = user_credits.user_id
+SET user_credits.used_credit = COALESCE(cl.total_used_credit, 0)
+WHERE user_credits.type = 0;
+
+UPDATE user_credits
+SET status = 1
+WHERE status IS NULL;
+
+INSERT INTO user_credits (user_id, type, remain_credit, used_credit, status, expire_time, created_at, updated_at)
+SELECT u.id, 0, COALESCE(u.credits, 0), 0, 1, '2027-12-30 23:59:59', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM users u
 LEFT JOIN user_credits uc
   ON uc.user_id = u.id
@@ -657,7 +697,9 @@ SELECT
   u.id,
   u.username,
   uc.type,
-  uc.balance,
+  uc.remain_credit,
+  uc.used_credit,
+  uc.status,
   uc.expire_time
 FROM users u
 LEFT JOIN user_credits uc
@@ -767,4 +809,123 @@ ALTER TABLE external_api_configs
 UPDATE external_api_configs
 SET request_format = 'json'
 WHERE request_format IS NULL OR request_format = '';
+```
+
+## user_credits 线上升级 SQL
+
+如果当前生产环境的 `user_credits` 还是旧结构，希望只做下面三项变更：
+
+- `balance` 改名为 `remain_credit`
+- 新增 `used_credit`
+- 新增 `status`
+
+可直接执行以下 SQL：
+
+```sql
+SET @has_user_credits := (
+  SELECT COUNT(*)
+  FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_credits'
+);
+
+SET @has_balance := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_credits'
+    AND COLUMN_NAME = 'balance'
+);
+
+SET @has_remain_credit := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_credits'
+    AND COLUMN_NAME = 'remain_credit'
+);
+
+SET @has_used_credit := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_credits'
+    AND COLUMN_NAME = 'used_credit'
+);
+
+SET @has_status := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_credits'
+    AND COLUMN_NAME = 'status'
+);
+
+SET @rename_balance_sql := IF(
+  @has_user_credits = 0,
+  'SELECT ''user_credits table not found'' AS info',
+  IF(
+    @has_remain_credit = 0 AND @has_balance > 0,
+    'ALTER TABLE user_credits CHANGE COLUMN balance remain_credit INT NOT NULL DEFAULT 0',
+    'SELECT ''skip rename balance -> remain_credit'' AS info'
+  )
+);
+
+PREPARE stmt_rename_balance FROM @rename_balance_sql;
+EXECUTE stmt_rename_balance;
+DEALLOCATE PREPARE stmt_rename_balance;
+
+SET @add_used_credit_sql := IF(
+  @has_user_credits = 0,
+  'SELECT ''user_credits table not found'' AS info',
+  IF(
+    @has_used_credit = 0,
+    'ALTER TABLE user_credits ADD COLUMN used_credit INT NOT NULL DEFAULT 0 AFTER remain_credit',
+    'SELECT ''skip add used_credit'' AS info'
+  )
+);
+
+PREPARE stmt_add_used_credit FROM @add_used_credit_sql;
+EXECUTE stmt_add_used_credit;
+DEALLOCATE PREPARE stmt_add_used_credit;
+
+SET @add_status_sql := IF(
+  @has_user_credits = 0,
+  'SELECT ''user_credits table not found'' AS info',
+  IF(
+    @has_status = 0,
+    'ALTER TABLE user_credits ADD COLUMN status TINYINT(1) NOT NULL DEFAULT 1 AFTER used_credit',
+    'SELECT ''skip add status'' AS info'
+  )
+);
+
+PREPARE stmt_add_status FROM @add_status_sql;
+EXECUTE stmt_add_status;
+DEALLOCATE PREPARE stmt_add_status;
+
+UPDATE user_credits
+SET used_credit = 0
+WHERE used_credit IS NULL;
+
+UPDATE user_credits
+SET status = 1
+WHERE status IS NULL;
+
+SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'user_credits'
+  AND COLUMN_NAME IN ('remain_credit', 'used_credit', 'status')
+ORDER BY ORDINAL_POSITION;
+
+SELECT
+  id,
+  user_id,
+  type,
+  remain_credit,
+  used_credit,
+  status
+FROM user_credits
+ORDER BY id ASC
+LIMIT 20;
 ```
