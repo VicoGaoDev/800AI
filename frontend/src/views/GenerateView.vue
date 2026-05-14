@@ -1628,6 +1628,18 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-footer">
+                <div class="generate-link-tip">
+                  解锁更多玩法，试试
+                  <a
+                    href="https://80ai.net/gptimage2-prompt"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="generate-link-tip-anchor"
+                  >
+                    提示词大全
+                  </a>
+                  (400+模版)
+                </div>
                 <a-button
                   type="primary"
                   block
@@ -1813,6 +1825,17 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-footer">
+                <div class="generate-link-tip">
+                  解锁更多玩法，试试
+                  <a
+                    href="https://80ai.net/gptimage2-prompt"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="generate-link-tip-anchor"
+                  >
+                    提示词大全
+                  </a>
+                </div>
                 <a-button
                   type="primary"
                   block
@@ -1900,6 +1923,17 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-footer">
+                <div class="generate-link-tip">
+                  解锁更多玩法，试试
+                  <a
+                    href="https://80ai.net/gptimage2-prompt"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="generate-link-tip-anchor"
+                  >
+                    提示词大全
+                  </a>
+                </div>
                 <a-button
                   type="primary"
                   block
@@ -2606,6 +2640,26 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     rgba(var(--theme-surface-strong-rgb), 0.94) 28%,
     var(--theme-surface-strong)
   );
+}
+
+.generate-link-tip {
+  margin-bottom: 8px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.generate-link-tip-anchor {
+  color: var(--theme-accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.generate-link-tip-anchor:hover,
+.generate-link-tip-anchor:focus {
+  color: var(--theme-accent-text-hover);
+  text-decoration: underline;
 }
 
 .config-section {
