@@ -2,7 +2,6 @@ from calendar import monthrange
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException, status
@@ -21,9 +20,8 @@ from app.services.user_credit_service import (
     get_user_credit_balance,
     get_user_credits_map,
 )
+from app.utils.datetime_utils import LOCAL_TZ, now_local, to_local_naive
 from app.utils.security import hash_password
-
-LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _non_whitelisted_user_filter():
@@ -399,7 +397,7 @@ def _to_local_datetime(value: datetime) -> datetime:
 
 
 def _to_db_datetime(value: datetime) -> datetime:
-    return _to_local_datetime(value).replace(tzinfo=None)
+    return to_local_naive(value)
 
 
 def _start_of_day(value: datetime) -> datetime:
@@ -450,7 +448,7 @@ def _align_range(
     start_date: datetime | None,
     end_date: datetime | None,
 ) -> tuple[datetime, datetime]:
-    now = datetime.now(LOCAL_TZ)
+    now = now_local().replace(tzinfo=LOCAL_TZ)
     if start_date is None or end_date is None:
         if granularity == "day":
             end = _end_of_day(now)

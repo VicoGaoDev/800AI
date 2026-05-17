@@ -21,6 +21,7 @@ from app.services.image_delivery_service import (
     serialize_image,
 )
 from app.services.business_id_service import task_external_id
+from app.utils.datetime_utils import now_local
 from app.utils.business_id import normalize_business_id
 
 
@@ -417,7 +418,7 @@ def toggle_history_pin(
         item_key=item_key,
         image_id=image_id if item_type == "task" else None,
         history_id=history_id if item_type == "prompt_history" else None,
-        pinned_at=datetime.utcnow(),
+        pinned_at=now_local(),
     )
     db.add(pin)
     db.commit()

@@ -11,7 +11,7 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import httpx
 from pathlib import Path
@@ -33,6 +33,7 @@ from app.services.external_api_config_service import (
     SCENE_INPAINT,
     should_use_multipart_request,
 )
+from app.utils.datetime_utils import now_local
 
 logger = logging.getLogger(__name__)
 MAX_ERROR_MESSAGE_LENGTH = 1800
@@ -67,13 +68,13 @@ def _clip_response_preview(payload: object) -> str:
 def _mark_task_request_started(task: Task) -> bool:
     if task.request_started_at is not None:
         return False
-    task.request_started_at = datetime.utcnow()
+    task.request_started_at = now_local()
     task.request_finished_at = None
     return True
 
 
 def _mark_task_request_finished(task: Task) -> None:
-    task.request_finished_at = datetime.utcnow()
+    task.request_finished_at = now_local()
 
 def _read_file_as_base64(ref_url: str) -> tuple[str, str] | None:
     """Read a local or remote image and return (mime_type, base64_data)."""
@@ -479,7 +480,7 @@ def _is_task_processing_timed_out(task: Task) -> bool:
     if last_progress_at is None:
         return False
 
-    return last_progress_at <= datetime.utcnow() - timedelta(seconds=timeout_seconds)
+    return last_progress_at <= now_local() - timedelta(seconds=timeout_seconds)
 
 
 def _expire_processing_task(

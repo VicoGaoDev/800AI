@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 import json
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.services.business_id_service import task_external_id, user_external_id
 from app.services.distributed_lock_service import acquire_redis_lock, release_redis_lock
 from app.services.external_api_config_service import SCENE_INPAINT, get_scene_credit_cost
 from app.services.user_credit_service import apply_user_credit_delta, get_user_credit_account
+from app.utils.datetime_utils import now_local
 from app.utils.business_id import normalize_business_id
 
 ACTIVE_TASK_STATUSES = ("pending", "queued", "processing")
@@ -65,7 +66,7 @@ def _expire_stale_processing_tasks(
     if timeout_seconds <= 0:
         return
 
-    cutoff = datetime.utcnow() - timedelta(seconds=timeout_seconds)
+    cutoff = now_local() - timedelta(seconds=timeout_seconds)
     query = db.query(Task).filter(
         Task.status == "processing",
         Task.is_deleted.is_(False),
@@ -354,7 +355,7 @@ def mark_tasks_queued(db: Session, task_ids: list[int]) -> None:
         .filter(Task.id.in_(task_ids), Task.status == "pending")
         .all()
     )
-    enqueued_at = datetime.utcnow()
+    enqueued_at = now_local()
     for task in tasks:
         task.status = "queued"
         task.error_message = ""
@@ -378,7 +379,7 @@ def mark_tasks_dispatched(db: Session, task_ids: list[int]) -> None:
     if not tasks:
         return
 
-    enqueued_at = datetime.utcnow()
+    enqueued_at = now_local()
     for task in tasks:
         if task.enqueued_at is None:
             task.enqueued_at = enqueued_at

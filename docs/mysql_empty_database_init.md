@@ -1007,3 +1007,100 @@ ORDER BY ORDINAL_POSITION;
 
 SHOW INDEX FROM feedback WHERE Key_name = 'ix_feedback_is_read';
 ```
+
+## tasks 历史时间修正 SQL（UTC -> 北京时间）
+
+如果历史数据中：
+
+- `created_at` / `updated_at` 已经是北京时间
+- 但 `enqueued_at` / `request_started_at` / `request_finished_at` 仍然是旧版本用 `datetime.utcnow()` 写入的 UTC 时间
+
+就会出现同一条任务里：
+
+- `created_at` 看起来是 `20:44:36`
+- `request_started_at` / `request_finished_at` 看起来是 `12:44:36`
+
+这种相差约 `8` 小时的混合时区问题。
+
+下面这段 SQL 只修正 **明显比 `created_at` 早 6~10 小时** 的任务链路时间，避免把本来已经正确的北京时间再次加 `8` 小时。
+
+建议步骤：
+
+1. 先完整备份线上数据库。
+2. 先执行“预览 SQL”，确认命中记录数量和样本是否符合预期。
+3. 确认无误后再执行 UPDATE。
+4. 执行完成后再次抽样检查。
+
+### 预览命中数据
+
+```sql
+SELECT
+  id,
+  business_id,
+  created_at,
+  enqueued_at,
+  request_started_at,
+  request_finished_at,
+  TIMESTAMPDIFF(HOUR, enqueued_at, created_at) AS diff_enqueued_hours,
+  TIMESTAMPDIFF(HOUR, request_started_at, created_at) AS diff_started_hours,
+  TIMESTAMPDIFF(HOUR, request_finished_at, created_at) AS diff_finished_hours
+FROM tasks
+WHERE
+  (enqueued_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, enqueued_at, created_at) BETWEEN 6 AND 10)
+  OR (request_started_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, request_started_at, created_at) BETWEEN 6 AND 10)
+  OR (request_finished_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, request_finished_at, created_at) BETWEEN 6 AND 10)
+ORDER BY id DESC
+LIMIT 200;
+```
+
+### 正式修正 SQL
+
+```sql
+UPDATE tasks
+SET
+  enqueued_at = CASE
+    WHEN enqueued_at IS NOT NULL
+      AND TIMESTAMPDIFF(HOUR, enqueued_at, created_at) BETWEEN 6 AND 10
+    THEN DATE_ADD(enqueued_at, INTERVAL 8 HOUR)
+    ELSE enqueued_at
+  END,
+  request_started_at = CASE
+    WHEN request_started_at IS NOT NULL
+      AND TIMESTAMPDIFF(HOUR, request_started_at, created_at) BETWEEN 6 AND 10
+    THEN DATE_ADD(request_started_at, INTERVAL 8 HOUR)
+    ELSE request_started_at
+  END,
+  request_finished_at = CASE
+    WHEN request_finished_at IS NOT NULL
+      AND TIMESTAMPDIFF(HOUR, request_finished_at, created_at) BETWEEN 6 AND 10
+    THEN DATE_ADD(request_finished_at, INTERVAL 8 HOUR)
+    ELSE request_finished_at
+  END
+WHERE
+  (enqueued_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, enqueued_at, created_at) BETWEEN 6 AND 10)
+  OR (request_started_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, request_started_at, created_at) BETWEEN 6 AND 10)
+  OR (request_finished_at IS NOT NULL AND TIMESTAMPDIFF(HOUR, request_finished_at, created_at) BETWEEN 6 AND 10);
+```
+
+### 修正后复核
+
+```sql
+SELECT
+  id,
+  business_id,
+  created_at,
+  enqueued_at,
+  request_started_at,
+  request_finished_at,
+  TIMESTAMPDIFF(SECOND, created_at, enqueued_at) AS diff_enqueued_seconds,
+  TIMESTAMPDIFF(SECOND, request_started_at, request_finished_at) AS request_duration_seconds
+FROM tasks
+WHERE
+  enqueued_at IS NOT NULL
+  OR request_started_at IS NOT NULL
+  OR request_finished_at IS NOT NULL
+ORDER BY id DESC
+LIMIT 50;
+```
+
+如果你的线上数据不是以 `created_at` 为北京时间基准，而是其它字段才是可信基准，建议不要直接执行上面的 UPDATE，先改成用你们实际可信的参考字段再操作。

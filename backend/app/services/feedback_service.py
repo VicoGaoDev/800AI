@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
@@ -16,6 +14,7 @@ from app.services.business_id_service import (
     task_external_id,
     user_external_id,
 )
+from app.utils.datetime_utils import now_local
 
 VALID_FEEDBACK_STATUSES = {"pending", "processing", "completed"}
 
@@ -222,7 +221,7 @@ def update_feedback(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的反馈状态")
         item.status = status_value
         if status_value == "completed":
-            item.handled_at = datetime.utcnow()
+            item.handled_at = now_local()
         else:
             item.handled_at = None
 
@@ -235,7 +234,7 @@ def update_feedback(
     item.handled_by = admin.id
 
     if item.status == "completed" and item.handled_at is None:
-        item.handled_at = datetime.utcnow()
+        item.handled_at = now_local()
 
     db.add(item)
     db.commit()

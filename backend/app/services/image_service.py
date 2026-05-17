@@ -1,9 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.models.image import Image
 from app.models.regenerate_log import RegenerateLog
+from app.utils.datetime_utils import now_local
 
 
 def get_image(db: Session, image_id: int) -> Image:
@@ -93,6 +92,6 @@ def delete_image_for_user(db: Session, image_id: int, user_id: int) -> bool:
 
     db.query(RegenerateLog).filter(RegenerateLog.image_id == image.id).delete(synchronize_session=False)
     image.is_deleted = True
-    image.deleted_at = datetime.utcnow()
+    image.deleted_at = now_local()
     db.commit()
     return True

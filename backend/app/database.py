@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from app.config import settings
@@ -13,6 +13,16 @@ engine = create_engine(
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_recycle=settings.DB_POOL_RECYCLE,
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_mysql_session_timezone(dbapi_connection, connection_record):
+    del connection_record
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET time_zone = '+08:00'")
+    finally:
+        cursor.close()
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

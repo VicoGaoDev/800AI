@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -16,6 +14,7 @@ from app.schemas.api_key import (
     ExternalApiSecretConfigOut,
     ExternalApiSecretConfigUpdate,
 )
+from app.utils.datetime_utils import now_local
 
 router = APIRouter(prefix="/api/admin/api-key", tags=["API Key 管理"])
 cos_router = APIRouter(prefix="/api/admin/cos-config", tags=["COS 配置"])
@@ -79,9 +78,9 @@ def set_api_key(
     record.announcement_enabled = 1 if body.announcement_enabled else 0
     record.announcement_content = normalized_announcement_content
     if announcement_changed:
-        record.announcement_updated_at = datetime.utcnow()
+        record.announcement_updated_at = now_local()
     elif not record.announcement_updated_at and (body.announcement_enabled or normalized_announcement_content):
-        record.announcement_updated_at = datetime.utcnow()
+        record.announcement_updated_at = now_local()
     db.commit()
     db.refresh(record)
     return record
