@@ -175,15 +175,6 @@ watch(loadMoreAnchor, (target) => {
         </div>
       </div>
       <div class="templates-topbar-actions">
-        <a-button
-          class="template-guide-btn"
-          href="https://80ai.net/gptimage2-prompt"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <template #icon><AppstoreOutlined /></template>
-          模版大全
-        </a-button>
         <a-button type="primary" class="warm-primary-btn" @click="router.push('/generate')">
           <template #icon><ThunderboltOutlined /></template>
           自定义绘图

@@ -546,7 +546,7 @@ watch(
           <div class="header-brand" @click="router.push('/')">
             <div class="brand-mark">🍌</div>
             <div class="brand-copy">
-              <span class="brand-name">80AI</span>
+              <span class="brand-name">800AI</span>
               <span class="brand-sub">AI Creative Studio</span>
             </div>
           </div>
@@ -704,7 +704,7 @@ watch(
         <div class="mobile-drawer-brand">
           <div class="brand-mark">🍌</div>
           <div class="brand-copy">
-            <span class="brand-name">80AI</span>
+            <span class="brand-name">800AI</span>
             <span class="brand-sub">AI Creative Studio</span>
           </div>
         </div>
