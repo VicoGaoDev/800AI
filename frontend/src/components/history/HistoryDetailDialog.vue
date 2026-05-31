@@ -223,7 +223,7 @@ function handleDownload(item: UserHistoryCard) {
                 <div v-if="img.status === 'failed'" class="detail-failure-message">
                   {{ getDetailFailureMessage(item, img) }}
                 </div>
-                <div v-else class="result-card-placeholder">
+                <div v-else-if="!getDetailImageSrc(item, img)" class="result-card-placeholder">
                   <a-spin
                     :indicator="h(LoadingOutlined, { style: { fontSize: '28px', color: '#7c8db5' } })"
                   />
@@ -470,7 +470,8 @@ function handleDownload(item: UserHistoryCard) {
   img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: center;
     display: block;
   }
 
@@ -483,7 +484,6 @@ function handleDownload(item: UserHistoryCard) {
 
 .detail-thumb-large {
   width: min(100%, 520px);
-  height: auto;
   aspect-ratio: 1 / 1;
 }
 
@@ -494,7 +494,9 @@ function handleDownload(item: UserHistoryCard) {
 }
 
 .detail-result-card {
-  height: clamp(220px, 36vh, 340px);
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--theme-panel-border);
@@ -514,8 +516,10 @@ function handleDownload(item: UserHistoryCard) {
 
   img {
     object-fit: contain;
+    object-position: center;
     display: block;
     background: var(--theme-panel-bg);
+    transition: transform var(--motion-duration-hover) var(--motion-ease-soft);
   }
 
   &.pending {
@@ -528,6 +532,10 @@ function handleDownload(item: UserHistoryCard) {
     box-shadow: 0 16px 28px var(--theme-shadow-medium);
   }
 
+  &:not(.pending):hover img {
+    transform: scale(1.015);
+  }
+
   &.failed img {
     object-fit: contain;
     padding: 18px;
@@ -535,11 +543,13 @@ function handleDownload(item: UserHistoryCard) {
   }
 
   &.single {
-    height: clamp(440px, 72vh, 680px);
+    width: min(100%, 520px);
   }
 }
 
 .result-card-placeholder {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: flex;

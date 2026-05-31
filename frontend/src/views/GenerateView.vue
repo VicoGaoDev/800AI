@@ -145,6 +145,8 @@ interface UploadPreviewItem {
 
 const DEFAULT_MAX_REFERENCE_IMAGES = 6;
 const referenceItems = ref<UploadPreviewItem[]>([]);
+const referenceDragActive = ref(false);
+let referenceDragDepth = 0;
 const fileInput = ref<HTMLInputElement | null>(null);
 const sourceImageUrl = ref("");
 const sourcePreviewUrl = ref("");
@@ -386,7 +388,7 @@ function parseAspectRatio(value?: string) {
 }
 
 function getTaskAspectRatio(task: GeneratedTaskItem) {
-  return parseAspectRatio(task.customSize) || parseAspectRatio(task.size) || "1 / 1";
+  return parseAspectRatio(task.size) || parseAspectRatio(task.customSize) || "1 / 1";
 }
 
 function getTaskAspectRatioValue(task: GeneratedTaskItem) {
@@ -748,20 +750,26 @@ function updateReferenceItem(id: string, patch: Partial<UploadPreviewItem>) {
   };
 }
 
-async function handleFileChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const files = Array.from(input.files || []);
-  if (!files.length) return;
+function isReferenceImageFile(file: File) {
+  if (file.type.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|svg|heic|heif|avif)$/i.test(file.name);
+}
+
+async function uploadReferenceFiles(files: File[]) {
+  const imageFiles = files.filter(isReferenceImageFile);
+  if (!imageFiles.length) {
+    if (files.length) message.warning("请上传图片文件");
+    return;
+  }
 
   const remainingSlots = Math.max(0, maxReferenceImages.value - referenceItems.value.length);
   if (!remainingSlots) {
     message.warning(`当前模型最多上传 ${maxReferenceImages.value} 张参考图`);
-    input.value = "";
     return;
   }
 
-  const acceptedFiles = files.slice(0, remainingSlots);
-  const skippedDueToLimit = files.length - acceptedFiles.length;
+  const acceptedFiles = imageFiles.slice(0, remainingSlots);
+  const skippedDueToLimit = imageFiles.length - acceptedFiles.length;
 
   if (skippedDueToLimit > 0) {
     message.warning(`当前模型最多支持 ${maxReferenceImages.value} 张参考图，本次仅上传前 ${acceptedFiles.length} 张`);
@@ -771,40 +779,36 @@ async function handleFileChange(e: Event) {
   let failedCount = 0;
   let oversizedCount = 0;
 
-  try {
-    for (const file of acceptedFiles) {
-      if (file.size > 10 * 1024 * 1024) {
-        oversizedCount += 1;
-        continue;
-      }
-
-      const objectUrl = URL.createObjectURL(file);
-      const item: UploadPreviewItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        localUrl: objectUrl,
-        remoteUrl: "",
-        status: "uploading",
-        objectUrl,
-      };
-      referenceItems.value.push(item);
-
-      try {
-        const res = await uploadReferenceImage(file, "ref");
-        revokeObjectUrl(objectUrl);
-        updateReferenceItem(item.id, {
-          objectUrl: undefined,
-          localUrl: res.url,
-          remoteUrl: res.url,
-          status: "success",
-        });
-        uploadedCount += 1;
-      } catch {
-        updateReferenceItem(item.id, { status: "failed" });
-        failedCount += 1;
-      }
+  for (const file of acceptedFiles) {
+    if (file.size > 10 * 1024 * 1024) {
+      oversizedCount += 1;
+      continue;
     }
-  } finally {
-    input.value = "";
+
+    const objectUrl = URL.createObjectURL(file);
+    const item: UploadPreviewItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      localUrl: objectUrl,
+      remoteUrl: "",
+      status: "uploading",
+      objectUrl,
+    };
+    referenceItems.value.push(item);
+
+    try {
+      const res = await uploadReferenceImage(file, "ref");
+      revokeObjectUrl(objectUrl);
+      updateReferenceItem(item.id, {
+        objectUrl: undefined,
+        localUrl: res.url,
+        remoteUrl: res.url,
+        status: "success",
+      });
+      uploadedCount += 1;
+    } catch {
+      updateReferenceItem(item.id, { status: "failed" });
+      failedCount += 1;
+    }
   }
 
   if (uploadedCount > 0) {
@@ -816,6 +820,60 @@ async function handleFileChange(e: Event) {
   if (failedCount > 0) {
     message.error(`${failedCount} 张参考图上传失败，请重试`);
   }
+}
+
+async function handleFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+
+  try {
+    await uploadReferenceFiles(files);
+  } finally {
+    input.value = "";
+  }
+}
+
+function resetReferenceDragState() {
+  referenceDragDepth = 0;
+  referenceDragActive.value = false;
+}
+
+function handleReferenceDragEnter(e: DragEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  referenceDragDepth += 1;
+  referenceDragActive.value = true;
+}
+
+function handleReferenceDragOver(e: DragEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = "copy";
+  }
+}
+
+function handleReferenceDragLeave(e: DragEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  referenceDragDepth = Math.max(0, referenceDragDepth - 1);
+  if (referenceDragDepth === 0) {
+    referenceDragActive.value = false;
+  }
+}
+
+async function handleReferenceDrop(e: DragEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  resetReferenceDragState();
+
+  if (!(await ensureAuthenticated())) return;
+
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (!files.length) return;
+
+  await uploadReferenceFiles(files);
 }
 
 function removeReference(index: number) {
@@ -1798,7 +1856,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               <div class="field-block ref-upload-block config-section">
                 <div class="panel-head">
                   <h3>参考图</h3>
-                  <span class="panel-hint">(最多 {{ maxReferenceImages }} 张)</span>
+                  <span class="panel-hint">(最多 {{ maxReferenceImages }} 张，支持拖拽上传)</span>
                 </div>
 
                 <input
@@ -1810,7 +1868,14 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   @change="handleFileChange"
                 />
 
-                <div class="upload-grid">
+                <div
+                  class="upload-grid"
+                  :class="{ 'upload-grid-dragging': referenceDragActive }"
+                  @dragenter="handleReferenceDragEnter"
+                  @dragover="handleReferenceDragOver"
+                  @dragleave="handleReferenceDragLeave"
+                  @drop="handleReferenceDrop"
+                >
                   <div
                     v-for="(item, idx) in referenceItems"
                     :key="item.id"
@@ -1846,7 +1911,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     />
                     <template v-else>
                       <CloudUploadOutlined style="font-size: 22px; color: var(--theme-accent)" />
-                      <span>上传</span>
+                      <span>{{ referenceDragActive ? "松开上传" : "上传" }}</span>
                     </template>
                   </div>
                 </div>
@@ -2207,7 +2272,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   class="result-card"
                   :style="{
                     '--generate-result-delay': `${Math.min(columnIndex + index, 9) * 45}ms`,
-                    '--result-aspect-ratio': getTaskAspectRatio(item.task),
                     '--result-pending-bg-image': `url('${generateEmptyStateAsset}')`,
                   }"
                   :class="{ pending: item.image.status === 'pending' }"
@@ -2239,6 +2303,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   </div>
                   <div
                     class="result-frame"
+                    :style="{ aspectRatio: getTaskAspectRatio(item.task) }"
                     :class="{
                       pending: item.image.status === 'pending',
                       failed: item.image.status === 'failed',
@@ -3012,6 +3077,26 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 18px;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-soft);
+
+  &.upload-grid-dragging {
+    background: var(--theme-panel-bg-soft);
+    box-shadow: inset 0 0 0 2px var(--theme-accent);
+
+    .upload-add {
+      border-color: var(--theme-accent);
+      color: var(--theme-accent-text);
+      transform: translateY(-2px);
+      box-shadow:
+        inset 0 1px 0 var(--theme-panel-inset),
+        0 14px 24px var(--theme-shadow-medium);
+    }
+  }
 }
 
 .generate-config-panel .upload-thumb {
@@ -3826,7 +3911,8 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .result-frame {
   position: relative;
-  aspect-ratio: var(--result-aspect-ratio, 1 / 1);
+  width: 100%;
+  aspect-ratio: 1 / 1;
   min-height: 0;
   border-radius: 16px;
   overflow: hidden;
@@ -3842,7 +3928,8 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     width: 100%;
     height: 100%;
     display: block;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: center;
     transition: transform var(--motion-duration-emphasis) var(--motion-ease-enter);
   }
 
@@ -3853,7 +3940,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   &.pending {
     background:
       linear-gradient(180deg, rgba(255, 252, 246, 0.24), rgba(255, 248, 238, 0.34)),
-      var(--result-pending-bg-image) center / cover no-repeat,
+      var(--result-pending-bg-image) center / contain no-repeat,
       linear-gradient(180deg, var(--theme-panel-bg-soft), var(--theme-panel-bg));
   }
 

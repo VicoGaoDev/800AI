@@ -77,7 +77,11 @@ const sceneEditingKey = ref("");
 const isCopyMode = ref(false);
 const isSceneCopyMode = ref(false);
 const configGroupFilter = ref("all");
+const configNameFilter = ref("");
+const configFormatFilter = ref<"all" | ExternalApiConfig["request_format"]>("all");
 const bindingGroupFilter = ref("all");
+const bindingNameFilter = ref("");
+const bindingSceneTypeFilter = ref<"all" | ExternalApiSceneType>("all");
 const secretVisible = ref(false);
 const tongyiSecretVisible = ref(false);
 const geminiKey = ref("");
@@ -156,16 +160,31 @@ const groupOptions = computed(() => {
   const groups = Array.from(new Set(configs.value.map((item) => item.group_name || "未分组").filter(Boolean)));
   return groups.sort((a, b) => a.localeCompare(b, "zh-CN"));
 });
-const filteredConfigs = computed(() => (
-  configGroupFilter.value === "all"
-    ? configs.value
-    : configs.value.filter((item) => item.group_name === configGroupFilter.value)
-));
-const filteredSceneBindings = computed(() => (
-  bindingGroupFilter.value === "all"
-    ? sceneBindings.value
-    : sceneBindings.value.filter((item) => (item.api_group_name || "未分组") === bindingGroupFilter.value)
-));
+const filteredConfigs = computed(() => {
+  const keyword = configNameFilter.value.trim().toLowerCase();
+  return configs.value.filter((item) => {
+    if (configGroupFilter.value !== "all" && item.group_name !== configGroupFilter.value) return false;
+    if (configFormatFilter.value !== "all" && item.request_format !== configFormatFilter.value) return false;
+    if (keyword && !item.name.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+});
+const filteredSceneBindings = computed(() => {
+  const keyword = bindingNameFilter.value.trim().toLowerCase();
+  return sceneBindings.value.filter((item) => {
+    if (bindingGroupFilter.value !== "all" && (item.api_group_name || "未分组") !== bindingGroupFilter.value) return false;
+    if (bindingSceneTypeFilter.value !== "all" && item.scene_type !== bindingSceneTypeFilter.value) return false;
+    if (!keyword) return true;
+    const searchableText = [
+      item.scene_label,
+      item.scene_key,
+      item.display_name,
+      item.scene_description,
+      item.api_config_name,
+    ].join(" ").toLowerCase();
+    return searchableText.includes(keyword);
+  });
+});
 const maskedGeminiKey = computed(() => {
   if (!geminiKey.value) return "";
   const value = geminiKey.value;
@@ -826,17 +845,30 @@ function copySecret(value: string, label: string) {
 
       <a-card title="接口配置" class="warm-card warm-table-card api-card motion-fade-up motion-card-lift" style="--motion-delay: 120ms">
         <template #extra>
-          <a-space>
-            <a-select v-model:value="configGroupFilter" class="warm-select" style="width: 180px">
-              <a-select-option value="all">全部分组</a-select-option>
-              <a-select-option v-for="group in groupOptions" :key="group" :value="group">
-                {{ group }}
-              </a-select-option>
-            </a-select>
+          <div class="api-card-extra">
+            <a-space wrap class="api-filter-row">
+              <a-input
+                v-model:value="configNameFilter"
+                allow-clear
+                placeholder="按名称筛选"
+                class="warm-input api-filter-input"
+              />
+              <a-select v-model:value="configGroupFilter" class="warm-select api-filter-select">
+                <a-select-option value="all">全部分组</a-select-option>
+                <a-select-option v-for="group in groupOptions" :key="group" :value="group">
+                  {{ group }}
+                </a-select-option>
+              </a-select>
+              <a-select v-model:value="configFormatFilter" class="warm-select api-filter-select">
+                <a-select-option value="all">全部格式</a-select-option>
+                <a-select-option value="json">JSON</a-select-option>
+                <a-select-option value="multipart">Multipart Form</a-select-option>
+              </a-select>
+            </a-space>
             <a-button type="primary" class="api-primary-btn" :icon="h(PlusOutlined)" @click="openCreate">
               新增接口
             </a-button>
-          </a-space>
+          </div>
         </template>
 
         <a-table
@@ -879,17 +911,32 @@ function copySecret(value: string, label: string) {
 
       <a-card title="场景绑定" class="warm-card warm-table-card api-card motion-fade-up motion-card-lift" style="--motion-delay: 200ms">
         <template #extra>
-          <a-space>
-            <a-select v-model:value="bindingGroupFilter" class="warm-select" style="width: 180px">
-              <a-select-option value="all">全部分组</a-select-option>
-              <a-select-option v-for="group in groupOptions" :key="group" :value="group">
-                {{ group }}
-              </a-select-option>
-            </a-select>
+          <div class="api-card-extra">
+            <a-space wrap class="api-filter-row">
+              <a-input
+                v-model:value="bindingNameFilter"
+                allow-clear
+                placeholder="按名称筛选"
+                class="warm-input api-filter-input"
+              />
+              <a-select v-model:value="bindingGroupFilter" class="warm-select api-filter-select">
+                <a-select-option value="all">全部分组</a-select-option>
+                <a-select-option v-for="group in groupOptions" :key="group" :value="group">
+                  {{ group }}
+                </a-select-option>
+              </a-select>
+              <a-select v-model:value="bindingSceneTypeFilter" class="warm-select api-filter-select">
+                <a-select-option value="all">全部场景</a-select-option>
+                <a-select-option value="generate">文生图</a-select-option>
+                <a-select-option value="image_edit">图编辑</a-select-option>
+                <a-select-option value="prompt_reverse">提示词反推</a-select-option>
+                <a-select-option value="inpaint">局部重绘</a-select-option>
+              </a-select>
+            </a-space>
             <a-button type="primary" class="api-primary-btn" :icon="h(PlusOutlined)" @click="openCreateScene">
               新增场景
             </a-button>
-          </a-space>
+          </div>
         </template>
 
         <a-alert
@@ -1441,6 +1488,27 @@ function copySecret(value: string, label: string) {
 
 .api-card :deep(.ant-card-body) {
   padding: 20px;
+}
+
+.api-card-extra {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.api-filter-row {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.api-filter-input {
+  width: 180px;
+}
+
+.api-filter-select {
+  width: 160px;
 }
 
 .secret-grid {

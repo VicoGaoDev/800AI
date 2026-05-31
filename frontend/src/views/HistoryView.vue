@@ -1322,7 +1322,7 @@ function handleEditImage(item: UserHistoryCard) {
   &.result-card-media-pending {
     background:
       linear-gradient(180deg, rgba(255, 252, 246, 0.24), rgba(255, 248, 238, 0.34)),
-      var(--history-pending-bg-image) center / cover no-repeat,
+      var(--history-pending-bg-image) center / contain no-repeat,
       linear-gradient(180deg, var(--theme-panel-bg-soft), var(--theme-panel-bg));
   }
 }
