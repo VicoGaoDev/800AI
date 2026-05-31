@@ -22,7 +22,6 @@ import { deletePromptHistory } from "@/api/auth";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import HistoryDetailDialog from "@/components/history/HistoryDetailDialog.vue";
 import { withBaseUrl } from "@/lib/assets";
-import { getAspectRatioFromTaskSize, getAspectRatioValue } from "@/lib/aspectRatio";
 import type { GenerationModelOption, TaskSceneConfig, TaskSource, TaskType, UserHistoryCard } from "@/types";
 
 const router = useRouter();
@@ -77,7 +76,6 @@ const previewSrc = ref("");
 const feedbackDialogOpen = ref(false);
 const feedbackTarget = ref<UserHistoryCard | null>(null);
 const pinningKeys = ref<string[]>([]);
-const viewportWidth = ref(typeof window === "undefined" ? 1440 : window.innerWidth);
 
 const modelOptions = computed(() => {
   const optionMap = new Map<string, string>();
@@ -105,49 +103,6 @@ const activeFilterCount = computed(() => {
   return count;
 });
 const hasMoreHistory = computed(() => items.value.length < total.value);
-
-function getHistoryItemAspectRatio(item: UserHistoryCard) {
-  return getAspectRatioFromTaskSize(item.size, item.custom_size);
-}
-
-function getHistoryItemAspectRatioValue(item: UserHistoryCard) {
-  return getAspectRatioValue(getHistoryItemAspectRatio(item));
-}
-
-const historyColumnCount = computed(() => {
-  if (viewportWidth.value <= 640) return 1;
-  if (viewportWidth.value <= 960) return 2;
-  if (viewportWidth.value <= 1180) return 3;
-  if (viewportWidth.value <= 1440) return 4;
-  if (viewportWidth.value <= 1680) return 5;
-  return 6;
-});
-
-const historyColumns = computed(() => {
-  const columns = Array.from({ length: historyColumnCount.value }, () => [] as UserHistoryCard[]);
-  const columnHeights = Array.from({ length: historyColumnCount.value }, () => 0);
-  const fixedRowItems = historyColumnCount.value * 2;
-
-  items.value.forEach((item, itemIndex) => {
-    let columnIndex = 0;
-    if (itemIndex < fixedRowItems) {
-      columnIndex = itemIndex % historyColumnCount.value;
-    } else {
-      columnIndex = columnHeights.reduce((bestIndex, height, index, list) => (
-        height < list[bestIndex] ? index : bestIndex
-      ), 0);
-    }
-
-    columns[columnIndex].push(item);
-    columnHeights[columnIndex] += 1 / getHistoryItemAspectRatioValue(item);
-  });
-
-  return columns;
-});
-
-function syncViewportWidth() {
-  viewportWidth.value = window.innerWidth;
-}
 
 const currentPageIds = computed(() => (
   items.value
@@ -280,12 +235,7 @@ async function loadModels() {
 
 onMounted(loadHistory);
 onMounted(loadModels);
-onMounted(() => {
-  syncViewportWidth();
-  window.addEventListener("resize", syncViewportWidth);
-});
 onBeforeUnmount(() => {
-  window.removeEventListener("resize", syncViewportWidth);
   stopHistoryPolling();
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer);
@@ -835,32 +785,24 @@ function handleEditImage(item: UserHistoryCard) {
         <a-empty :description="activeFilterCount ? '没有符合条件的历史记录' : '暂无生成记录'" />
       </div>
 
-      <div v-else class="history-grid">
-        <TransitionGroup
-          v-for="(column, columnIndex) in historyColumns"
-          :key="`history-column-${columnIndex}`"
-          name="history-card"
-          tag="div"
-          class="history-column"
+      <TransitionGroup v-else name="history-card" tag="div" class="history-grid">
+        <div
+          v-for="(item, index) in items"
+          :key="getHistoryItemKey(item)"
+          class="result-card warm-card"
+          :style="{ '--history-card-delay': `${Math.min(index, 9) * 45}ms` }"
+          @click="openDetail(item)"
         >
           <div
-            v-for="(item, index) in column"
-            :key="getHistoryItemKey(item)"
-            class="result-card warm-card"
-            :style="{ '--history-card-delay': `${Math.min(columnIndex + index, 9) * 45}ms` }"
-            @click="openDetail(item)"
+            class="result-card-media"
+            :class="{
+              'result-card-media-failed': item.status === 'failed',
+              'result-card-media-pending': isHistoryItemPending(item.status),
+            }"
+            :style="{
+              '--history-pending-bg-image': `url('${generateEmptyStateAsset}')`,
+            }"
           >
-            <div
-              class="result-card-media"
-              :class="{
-                'result-card-media-failed': item.status === 'failed',
-                'result-card-media-pending': isHistoryItemPending(item.status),
-              }"
-              :style="{
-                aspectRatio: getHistoryItemAspectRatio(item),
-                '--history-pending-bg-image': `url('${generateEmptyStateAsset}')`,
-              }"
-            >
             <div v-if="batchMode" class="result-card-select" @click.stop>
               <a-checkbox
                 :checked="typeof item.image_id === 'number' ? isSelected(item.image_id) : false"
@@ -959,8 +901,7 @@ function handleEditImage(item: UserHistoryCard) {
             </div>
           </div>
         </div>
-        </TransitionGroup>
-      </div>
+      </TransitionGroup>
     </a-spin>
 
     <div v-if="loadingMore" class="history-load-more-tip">
@@ -1278,13 +1219,6 @@ function handleEditImage(item: UserHistoryCard) {
 .history-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  align-items: start;
-  gap: 12px;
-}
-
-.history-column {
-  display: flex;
-  flex-direction: column;
   gap: 12px;
 }
 
@@ -1349,14 +1283,12 @@ function handleEditImage(item: UserHistoryCard) {
 .result-card-media {
   --media-radius: 16px;
   width: 100%;
-  min-height: 0;
+  aspect-ratio: 1 / 1;
   box-sizing: border-box;
   border-radius: var(--media-radius);
   overflow: hidden;
   border: 1px dashed var(--theme-panel-border);
-  background:
-    radial-gradient(circle at 50% 45%, rgba(var(--theme-surface-strong-rgb), 0.98) 0%, rgba(var(--theme-page-base-rgb), 0.98) 58%, rgba(var(--theme-page-base-rgb), 0.96) 100%),
-    linear-gradient(180deg, var(--theme-panel-bg), var(--theme-panel-bg-strong));
+  background: #fff;
   box-shadow: 0 12px 24px var(--theme-shadow-soft);
   cursor: pointer;
   position: relative;
@@ -1368,12 +1300,12 @@ function handleEditImage(item: UserHistoryCard) {
   img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     object-position: center;
     box-sizing: border-box;
     display: block;
     border-radius: calc(var(--media-radius) - 1px);
-    background: transparent;
+    background: #fff;
     transition: transform var(--motion-duration-emphasis) var(--motion-ease-enter);
   }
 
@@ -1388,8 +1320,8 @@ function handleEditImage(item: UserHistoryCard) {
   &.result-card-media-pending {
     background:
       linear-gradient(180deg, rgba(255, 252, 246, 0.24), rgba(255, 248, 238, 0.34)),
-      var(--history-pending-bg-image) center / cover no-repeat,
-      linear-gradient(180deg, var(--theme-panel-bg-soft), var(--theme-panel-bg));
+      var(--history-pending-bg-image) center / contain no-repeat,
+      #fff;
   }
 }
 

@@ -105,7 +105,7 @@ const repaintPrompt = ref("");
 const selectedModel = ref("");
 const numImages = ref(1);
 const resolution = ref("2K");
-const size = ref("9:16");
+const size = ref("1:1");
 const customSize = ref("");
 
 type GeneratedTaskStatus = TaskResult["status"] | "submitting";
@@ -526,7 +526,7 @@ function convertHistoryCardToGeneratedTask(item: UserHistoryCard): GeneratedTask
     prompt: item.prompt || "",
     model: item.model || undefined,
     numImages: fallbackImageCount,
-    size: item.size || "9:16",
+    size: item.size || "",
     resolution: item.resolution || "2K",
     customSize: item.custom_size || "",
     referenceImages: Array.isArray(item.reference_images) ? item.reference_images : [],
@@ -1138,7 +1138,7 @@ async function handleGenerate() {
 
 function handleReeditTask(task: GeneratedTaskItem) {
   generateMode.value = task.mode;
-  size.value = task.size || "9:16";
+  size.value = task.size || "";
   resolution.value = task.resolution || "2K";
   customSize.value = task.customSize || "";
 
@@ -1182,7 +1182,7 @@ function handleEditImageTask(task: GeneratedTaskItem, image: ImageResult) {
   prompt.value = task.prompt;
   repaintPrompt.value = "";
   if (task.model) selectedModel.value = task.model;
-  size.value = task.size || "9:16";
+  size.value = task.size || "";
   resolution.value = task.resolution || "2K";
   customSize.value = task.customSize || "";
   numImages.value = Math.min(4, Math.max(1, Number(task.numImages || 1)));
@@ -1403,7 +1403,7 @@ function applyDraft(raw: string | null, successText: string, storageKey: string)
           ? "imageEdit"
           : "textGenerate";
     generateMode.value = draftMode;
-    size.value = draft.size || "9:16";
+    size.value = draft.size || "";
     resolution.value = draft.resolution || "2K";
     customSize.value = draft.custom_size || "";
 
@@ -2277,7 +2277,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   </div>
                   <div
                     class="result-frame"
-                    :style="{ aspectRatio: getTaskAspectRatio(item.task) }"
+                    :style="{ aspectRatio: getTaskAspectRatioValue(item.task) }"
                     :class="{
                       pending: item.image.status === 'pending',
                       failed: item.image.status === 'failed',
