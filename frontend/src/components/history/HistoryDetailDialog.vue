@@ -5,6 +5,7 @@ import { CopyOutlined, DownloadOutlined, LoadingOutlined, PictureOutlined, Reloa
 import dayjs from "dayjs";
 import { getDisplayImageUrl, getPreviewImageUrl, resolveImageUrl } from "@/api/images";
 import { withBaseUrl } from "@/lib/assets";
+import { getAspectRatioFromTaskSize } from "@/lib/aspectRatio";
 import { getTaskImageFailureMessage } from "@/lib/generationErrors";
 import type { ImageResult, UserHistoryCard } from "@/types";
 
@@ -144,6 +145,10 @@ function getDetailFailureMessage(item: UserHistoryCard, image: ImageResult) {
   return getTaskImageFailureMessage(item, image);
 }
 
+function getDetailItemAspectRatio(item: UserHistoryCard) {
+  return getAspectRatioFromTaskSize(item.size, item.custom_size);
+}
+
 function openPreview(url: string) {
   if (!url) return;
   previewSrc.value = url;
@@ -192,6 +197,7 @@ function handleDownload(item: UserHistoryCard) {
             <div v-if="item.mode === 'promptReverse' && item.source_image" class="detail-thumb-row">
               <div
                 class="detail-thumb detail-thumb-large"
+                :style="{ aspectRatio: getDetailItemAspectRatio(item) }"
                 @click="!isHistoryItemExpired(item) && openPreview(resolveImageUrl(item.source_image))"
               >
                 <img
@@ -206,6 +212,7 @@ function handleDownload(item: UserHistoryCard) {
                 v-for="img in item.images"
                 :key="img.id"
                 class="detail-result-card"
+                :style="{ aspectRatio: getDetailItemAspectRatio(item) }"
                 :class="{
                   single: item.images.length === 1,
                   pending: !getDetailImageSrc(item, img) && img.status !== 'failed',
@@ -470,7 +477,7 @@ function handleDownload(item: UserHistoryCard) {
   img {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
     object-position: center;
     display: block;
   }
@@ -484,7 +491,6 @@ function handleDownload(item: UserHistoryCard) {
 
 .detail-thumb-large {
   width: min(100%, 520px);
-  aspect-ratio: 1 / 1;
 }
 
 .detail-result-grid {
@@ -495,7 +501,6 @@ function handleDownload(item: UserHistoryCard) {
 
 .detail-result-card {
   width: 100%;
-  aspect-ratio: 1 / 1;
   min-height: 0;
   border-radius: 20px;
   overflow: hidden;
@@ -515,7 +520,7 @@ function handleDownload(item: UserHistoryCard) {
   }
 
   img {
-    object-fit: contain;
+    object-fit: cover;
     object-position: center;
     display: block;
     background: var(--theme-panel-bg);

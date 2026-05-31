@@ -40,6 +40,7 @@ import RepaintCanvas from "@/components/generate/RepaintCanvas.vue";
 import FeedbackDialog from "@/components/feedback/FeedbackDialog.vue";
 import { withBaseUrl } from "@/lib/assets";
 import { formatGenerationErrorMessage, getPreferredGenerationErrorMessage } from "@/lib/generationErrors";
+import { extractDroppedFiles, getAspectRatioFromTaskSize, getAspectRatioValue } from "@/lib/aspectRatio";
 import { setStoredUserCompletedUnreadFeedbackCount } from "@/lib/userFeedbackNotice";
 import type { GenerationModelOption, ImageResult, PromptHistoryItem, SceneOptionItem, TaskResult, TaskSceneConfig, UserHistoryCard } from "@/types";
 
@@ -146,7 +147,6 @@ interface UploadPreviewItem {
 const DEFAULT_MAX_REFERENCE_IMAGES = 6;
 const referenceItems = ref<UploadPreviewItem[]>([]);
 const referenceDragActive = ref(false);
-let referenceDragDepth = 0;
 const fileInput = ref<HTMLInputElement | null>(null);
 const sourceImageUrl = ref("");
 const sourcePreviewUrl = ref("");
@@ -367,37 +367,12 @@ function createPendingImages(count: number) {
   }));
 }
 
-function parseAspectRatio(value?: string) {
-  if (!value) return null;
-  const normalized = value.trim();
-  const ratioMatch = normalized.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
-  if (ratioMatch) {
-    const width = Number(ratioMatch[1]);
-    const height = Number(ratioMatch[2]);
-    if (width > 0 && height > 0) return `${width} / ${height}`;
-  }
-
-  const sizeMatch = normalized.match(/^(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)$/);
-  if (sizeMatch) {
-    const width = Number(sizeMatch[1]);
-    const height = Number(sizeMatch[2]);
-    if (width > 0 && height > 0) return `${width} / ${height}`;
-  }
-
-  return null;
-}
-
 function getTaskAspectRatio(task: GeneratedTaskItem) {
-  return parseAspectRatio(task.size) || parseAspectRatio(task.customSize) || "1 / 1";
+  return getAspectRatioFromTaskSize(task.size, task.customSize);
 }
 
 function getTaskAspectRatioValue(task: GeneratedTaskItem) {
-  const ratio = getTaskAspectRatio(task);
-  const [widthText, heightText] = ratio.split("/").map((item) => item.trim());
-  const width = Number(widthText);
-  const height = Number(heightText);
-  if (!width || !height) return 1;
-  return width / height;
+  return getAspectRatioValue(getTaskAspectRatio(task));
 }
 
 function createLocalGeneratedTask(taskDraft: GeneratedTaskDraft): GeneratedTaskItem {
@@ -827,6 +802,11 @@ async function handleFileChange(e: Event) {
   const files = Array.from(input.files || []);
   if (!files.length) return;
 
+  if (!(await ensureAuthenticated())) {
+    input.value = "";
+    return;
+  }
+
   try {
     await uploadReferenceFiles(files);
   } finally {
@@ -835,44 +815,36 @@ async function handleFileChange(e: Event) {
 }
 
 function resetReferenceDragState() {
-  referenceDragDepth = 0;
   referenceDragActive.value = false;
 }
 
 function handleReferenceDragEnter(e: DragEvent) {
   e.preventDefault();
-  e.stopPropagation();
-  referenceDragDepth += 1;
+  if (!e.dataTransfer?.types.includes("Files")) return;
   referenceDragActive.value = true;
 }
 
 function handleReferenceDragOver(e: DragEvent) {
   e.preventDefault();
-  e.stopPropagation();
   if (e.dataTransfer) {
     e.dataTransfer.dropEffect = "copy";
   }
 }
 
 function handleReferenceDragLeave(e: DragEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  referenceDragDepth = Math.max(0, referenceDragDepth - 1);
-  if (referenceDragDepth === 0) {
-    referenceDragActive.value = false;
-  }
+  const currentTarget = e.currentTarget as HTMLElement;
+  const related = e.relatedTarget as Node | null;
+  if (related && currentTarget.contains(related)) return;
+  resetReferenceDragState();
 }
 
 async function handleReferenceDrop(e: DragEvent) {
   e.preventDefault();
   e.stopPropagation();
+  const files = extractDroppedFiles(e.dataTransfer);
   resetReferenceDragState();
-
-  if (!(await ensureAuthenticated())) return;
-
-  const files = Array.from(e.dataTransfer?.files || []);
   if (!files.length) return;
-
+  if (!(await ensureAuthenticated())) return;
   await uploadReferenceFiles(files);
 }
 
@@ -1853,7 +1825,13 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                 </div>
               </div>
 
-              <div class="field-block ref-upload-block config-section">
+              <div
+                class="field-block ref-upload-block config-section"
+                @dragenter="handleReferenceDragEnter"
+                @dragover="handleReferenceDragOver"
+                @dragleave="handleReferenceDragLeave"
+                @drop="handleReferenceDrop"
+              >
                 <div class="panel-head">
                   <h3>参考图</h3>
                   <span class="panel-hint">(最多 {{ maxReferenceImages }} 张，支持拖拽上传)</span>
@@ -1871,10 +1849,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                 <div
                   class="upload-grid"
                   :class="{ 'upload-grid-dragging': referenceDragActive }"
-                  @dragenter="handleReferenceDragEnter"
-                  @dragover="handleReferenceDragOver"
-                  @dragleave="handleReferenceDragLeave"
-                  @drop="handleReferenceDrop"
                 >
                   <div
                     v-for="(item, idx) in referenceItems"
@@ -3912,7 +3886,6 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 .result-frame {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
   min-height: 0;
   border-radius: 16px;
   overflow: hidden;
@@ -3928,7 +3901,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     width: 100%;
     height: 100%;
     display: block;
-    object-fit: contain;
+    object-fit: cover;
     object-position: center;
     transition: transform var(--motion-duration-emphasis) var(--motion-ease-enter);
   }
@@ -3940,7 +3913,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   &.pending {
     background:
       linear-gradient(180deg, rgba(255, 252, 246, 0.24), rgba(255, 248, 238, 0.34)),
-      var(--result-pending-bg-image) center / contain no-repeat,
+      var(--result-pending-bg-image) center / cover no-repeat,
       linear-gradient(180deg, var(--theme-panel-bg-soft), var(--theme-panel-bg));
   }
 
