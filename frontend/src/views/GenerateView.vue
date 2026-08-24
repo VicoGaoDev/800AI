@@ -47,7 +47,10 @@ import { getMe } from "@/api/auth";
 import { getMyCompletedUnreadFeedbackCount } from "@/api/feedback";
 import { useAuthStore } from "@/stores/auth";
 import AspectRatioPicker from "@/components/generate/AspectRatioPicker.vue";
+import GenerateStylePicker from "@/components/generate/GenerateStylePicker.vue";
+import GenerateStyleTags from "@/components/generate/GenerateStyleTags.vue";
 import OptionGridPicker from "@/components/generate/OptionGridPicker.vue";
+import { composeGeneratePrompt, parseGeneratePrompt } from "@/lib/generateStyles";
 import PromptInterceptionTip from "@/components/generate/PromptInterceptionTip.vue";
 import { withBaseUrl } from "@/lib/assets";
 import {
@@ -144,6 +147,8 @@ const resolution = ref("2K");
 const size = ref("9:16");
 const customSize = ref("");
 const aspectRatioAutoDetectEnabled = ref(readStoredAspectRatioAutoDetectEnabled());
+const selectedColorStyleId = ref("");
+const selectedLightingStyleId = ref("");
 
 type GeneratedTaskStatus = TaskResult["status"] | "submitting";
 type SubmitMode = Exclude<GenerateMode, "promptReverse">;
@@ -349,10 +354,11 @@ const hasBlockedUploads = computed(() => {
   }
   return false;
 });
+const hasSelectedGenerateStyles = computed(() => Boolean(selectedColorStyleId.value || selectedLightingStyleId.value));
 const canClickGenerate = computed(() => {
   if (hasBlockedUploads.value) return false;
   if (isImageEditMode.value) return true;
-  return !!activePrompt.value.trim();
+  return !!activePrompt.value.trim() || hasSelectedGenerateStyles.value;
 });
 const activeGenerationImageCount = computed(() => (
   generatedTasks.value.reduce((total, task) => {
@@ -1623,6 +1629,30 @@ function applyReversePrompt() {
   message.success("已带入到文生图");
 }
 
+function applyPromptWithGenerateStyles(fullPrompt: string, target: "prompt" | "repaintPrompt") {
+  const parsed = parseGeneratePrompt(fullPrompt);
+  selectedColorStyleId.value = parsed.colorStyleId;
+  selectedLightingStyleId.value = parsed.lightingStyleId;
+  if (target === "repaintPrompt") {
+    repaintPrompt.value = parsed.userPrompt;
+    return;
+  }
+  prompt.value = parsed.userPrompt;
+}
+
+function buildSubmitPrompt(userPrompt: string) {
+  const assembled = composeGeneratePrompt(
+    userPrompt,
+    selectedColorStyleId.value,
+    selectedLightingStyleId.value,
+  );
+  if (assembled.length > TASK_PROMPT_MAX_LENGTH) {
+    message.warning("加上风格提示词后超出长度限制，请缩短提示词或取消部分风格");
+    return "";
+  }
+  return assembled;
+}
+
 async function handleGenerate() {
   if (!(await ensureAuthenticated())) return;
   if (isImageEditMode.value && hasPendingReferenceUploads.value) {
@@ -1637,7 +1667,7 @@ async function handleGenerate() {
     message.warning("请先上传参考图片，再开始图编辑；如无需上传图片，请切换到文生图");
     return;
   }
-  if (!activePrompt.value.trim()) {
+  if (!activePrompt.value.trim() && !hasSelectedGenerateStyles.value) {
     message.warning("请输入提示词");
     return;
   }
@@ -1650,6 +1680,9 @@ async function handleGenerate() {
     showInsufficientCreditsPurchase(`积分不足，需要 ${actualSubmitCreditCost.value} 积分，当前余额 ${userCredits.value}`);
     return;
   }
+
+  const submitPrompt = buildSubmitPrompt(activePrompt.value);
+  if (!submitPrompt) return;
 
   let payload: GenerateTaskPayload;
   let requestedImageCount = 1;
@@ -1680,7 +1713,7 @@ async function handleGenerate() {
     }
     payload = {
       mode: "inpaint",
-      prompt: repaintPrompt.value,
+      prompt: submitPrompt,
       num_images: 1,
       size: size.value,
       resolution: resolution.value,
@@ -1693,7 +1726,7 @@ async function handleGenerate() {
     payload = {
       mode: "generate",
       model: selectedModel.value,
-      prompt: prompt.value,
+      prompt: submitPrompt,
       num_images: requestedImageCount,
       size: hideAspectRatio.value ? "" : size.value,
       resolution: hideResolution.value ? "" : resolution.value,
@@ -1713,7 +1746,7 @@ async function handleGenerate() {
   try {
     await submitGeneratedTask(payload, {
       mode: submitMode,
-      prompt: activePrompt.value.trim(),
+      prompt: submitPrompt,
       model: payload.model,
       numImages: payload.num_images,
       size: payload.size,
@@ -1740,7 +1773,7 @@ function handleReeditTask(task: GeneratedTaskItem) {
   customSize.value = task.customSize || "";
 
   if (task.mode === "inpaint") {
-    repaintPrompt.value = task.prompt;
+    applyPromptWithGenerateStyles(task.prompt, "repaintPrompt");
     prompt.value = "";
     syncReferenceItems([]);
     revokeObjectUrl(sourcePreviewUrl.value);
@@ -1752,7 +1785,7 @@ function handleReeditTask(task: GeneratedTaskItem) {
     canRedoMask.value = false;
   } else {
     generateMode.value = task.referenceImages.length ? "imageEdit" : "textGenerate";
-    prompt.value = task.prompt;
+    applyPromptWithGenerateStyles(task.prompt, "prompt");
     repaintPrompt.value = "";
     if (task.model) selectedModel.value = task.model;
     numImages.value = Math.min(MAX_ACTIVE_GENERATION_IMAGES, Math.max(1, Number(task.numImages || 1)));
@@ -1776,7 +1809,7 @@ function handleEditImageTask(task: GeneratedTaskItem, image: ImageResult) {
     return;
   }
   generateMode.value = "imageEdit";
-  prompt.value = task.prompt;
+  applyPromptWithGenerateStyles(task.prompt, "prompt");
   repaintPrompt.value = "";
   size.value = task.size || "9:16";
   resolution.value = task.resolution || "2K";
@@ -2013,11 +2046,10 @@ function useLibraryPrompt(item: UserPrompt) {
     message.warning("该提示词内容为空");
     return;
   }
-  if (generateMode.value === "inpaint") {
-    repaintPrompt.value = content;
-  } else {
-    prompt.value = content;
-  }
+  applyPromptWithGenerateStyles(
+    content,
+    generateMode.value === "inpaint" ? "repaintPrompt" : "prompt",
+  );
   message.success("已回填到编辑区");
 }
 
@@ -2049,7 +2081,7 @@ function applyDraft(raw: string | null, successText: string, storageKey: string)
     customSize.value = draft.custom_size || "";
 
     if (draftMode === "inpaint") {
-      repaintPrompt.value = draft.prompt || "";
+      applyPromptWithGenerateStyles(draft.prompt || "", "repaintPrompt");
       revokeObjectUrl(sourcePreviewUrl.value);
       sourceImageUrl.value = draft.source_image || "";
       sourcePreviewUrl.value = "";
@@ -2077,7 +2109,7 @@ function applyDraft(raw: string | null, successText: string, storageKey: string)
       canRedoMask.value = false;
       numImages.value = 1;
     } else {
-      prompt.value = draft.prompt || "";
+      applyPromptWithGenerateStyles(draft.prompt || "", "prompt");
       selectedModel.value = draft.model || selectedModel.value;
       syncReferenceItems(Array.isArray(draft.reference_images) ? draft.reference_images.slice(0, maxReferenceImages.value) : []);
       numImages.value = Math.min(MAX_ACTIVE_GENERATION_IMAGES, Math.max(1, Number(draft.num_images || 1)));
@@ -2427,6 +2459,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   <label>提示词</label>
                   <div class="prompt-label-actions">
                     <PromptInterceptionTip />
+                    <GenerateStylePicker
+                      v-model:color-style-id="selectedColorStyleId"
+                      v-model:lighting-style-id="selectedLightingStyleId"
+                    />
                     <a-tooltip :title="PROMPT_OPTIMIZE_TOOLTIP">
                       <span>
                         <a-button type="text" class="prompt-library-btn" :loading="promptOptimizeLoading" @click="handlePromptOptimize">
@@ -2438,11 +2474,15 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     <a-button type="text" class="prompt-library-btn" @click="openPromptLibrary">提示词库</a-button>
                   </div>
                 </div>
-                <div class="prompt-input-wrap">
+                <div class="prompt-input-wrap" :class="{ 'has-style-tags': hasSelectedGenerateStyles }">
+                  <GenerateStyleTags
+                    v-model:color-style-id="selectedColorStyleId"
+                    v-model:lighting-style-id="selectedLightingStyleId"
+                  />
                   <a-textarea
                     v-model:value="prompt"
                     :rows="5"
-                    placeholder="描述您想要生成的图片..."
+                    :placeholder="hasSelectedGenerateStyles ? '' : '描述您想要生成的图片...'"
                     class="prompt-input"
                     :maxlength="TASK_PROMPT_MAX_LENGTH"
                     :allow-clear="!isPromptOptimizeOnMainPrompt"
@@ -2734,6 +2774,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                   <label>提示词</label>
                   <div class="prompt-label-actions">
                     <PromptInterceptionTip />
+                    <GenerateStylePicker
+                      v-model:color-style-id="selectedColorStyleId"
+                      v-model:lighting-style-id="selectedLightingStyleId"
+                    />
                     <a-tooltip :title="PROMPT_OPTIMIZE_TOOLTIP">
                       <span>
                         <a-button type="text" class="prompt-library-btn" :loading="promptOptimizeLoading" @click="handlePromptOptimize">
@@ -2745,11 +2789,15 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     <a-button type="text" class="prompt-library-btn" @click="openPromptLibrary">提示词库</a-button>
                   </div>
                 </div>
-                <div class="prompt-input-wrap">
+                <div class="prompt-input-wrap" :class="{ 'has-style-tags': hasSelectedGenerateStyles }">
+                  <GenerateStyleTags
+                    v-model:color-style-id="selectedColorStyleId"
+                    v-model:lighting-style-id="selectedLightingStyleId"
+                  />
                   <a-textarea
                     v-model:value="prompt"
                     :rows="5"
-                    placeholder="描述您想要生成的图片..."
+                    :placeholder="hasSelectedGenerateStyles ? '' : '描述您想要生成的图片...'"
                     class="prompt-input"
                     :maxlength="TASK_PROMPT_MAX_LENGTH"
                     :allow-clear="!isPromptOptimizeOnMainPrompt"
@@ -3111,6 +3159,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                 <div class="prompt-label-row">
                   <label>提示词</label>
                   <div class="prompt-label-actions">
+                    <GenerateStylePicker
+                      v-model:color-style-id="selectedColorStyleId"
+                      v-model:lighting-style-id="selectedLightingStyleId"
+                    />
                     <a-tooltip :title="PROMPT_OPTIMIZE_TOOLTIP">
                       <span>
                         <a-button type="text" class="prompt-library-btn" :loading="promptOptimizeLoading" @click="handlePromptOptimize">
@@ -3122,11 +3174,15 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     <a-button type="text" class="prompt-library-btn" @click="openPromptLibrary">提示词库</a-button>
                   </div>
                 </div>
-                <div class="prompt-input-wrap">
+                <div class="prompt-input-wrap" :class="{ 'has-style-tags': hasSelectedGenerateStyles }">
+                  <GenerateStyleTags
+                    v-model:color-style-id="selectedColorStyleId"
+                    v-model:lighting-style-id="selectedLightingStyleId"
+                  />
                   <a-textarea
                     v-model:value="repaintPrompt"
                     :rows="5"
-                    placeholder="描述需要局部重绘后的效果..."
+                    :placeholder="hasSelectedGenerateStyles ? '' : '描述需要局部重绘后的效果...'"
                     class="prompt-input"
                     :maxlength="TASK_PROMPT_MAX_LENGTH"
                     :allow-clear="!isPromptOptimizeOnRepaintPrompt"
@@ -3810,6 +3866,10 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 
 .prompt-input-wrap {
   position: relative;
+}
+
+.prompt-input-wrap.has-style-tags .prompt-input :deep(textarea) {
+  padding-top: 48px !important;
 }
 
 .prompt-optimize-status {
@@ -6207,6 +6267,19 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .settings-f
     rgba(var(--theme-surface-strong-rgb), 0.92) 28%,
     var(--theme-surface-strong)
   );
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page :deep(.generate-style-trigger) {
+  color: var(--text-secondary);
+  background: var(--theme-panel-bg-soft);
+  border-color: var(--theme-panel-border);
+
+  &:hover,
+  &.open {
+    color: var(--theme-title);
+    background: var(--theme-control-hover-bg);
+    border-color: var(--theme-border-strong);
+  }
 }
 
 html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .prompt-library-btn,
