@@ -18,6 +18,7 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   LoadingOutlined,
+  PlusOutlined,
   ExclamationCircleFilled,
   RedoOutlined,
   ReloadOutlined,
@@ -42,7 +43,7 @@ import {
 } from "@/api/images";
 import { reversePrompt } from "@/api/promptReverse";
 import { optimizePrompt } from "@/api/promptOptimize";
-import { getUserAssetStats, uploadUserAssetFile } from "@/api/userAssets";
+import { getUserAssetStats, importUserAssetFromUrl } from "@/api/userAssets";
 import { getMe } from "@/api/auth";
 import { getMyCompletedUnreadFeedbackCount } from "@/api/feedback";
 import { useAuthStore } from "@/stores/auth";
@@ -55,7 +56,6 @@ import PromptInterceptionTip from "@/components/generate/PromptInterceptionTip.v
 import { withBaseUrl } from "@/lib/assets";
 import {
   getAssetQuotaFullMessage,
-  getAssetQuotaTruncatedMessage,
   resolveAssetQuotaErrorMessage,
 } from "@/lib/userAssetQuota";
 import {
@@ -185,6 +185,9 @@ interface UploadPreviewItem {
   remoteUrl: string;
   status: UploadItemStatus;
   objectUrl?: string;
+  fileName?: string;
+  assetId?: number;
+  savingToAsset?: boolean;
 }
 
 const DEFAULT_MAX_REFERENCE_IMAGES = 6;
@@ -963,6 +966,10 @@ function revokeObjectUrl(url?: string) {
   if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
+function getBodyPopupContainer() {
+  return document.body;
+}
+
 function syncReferenceItems(urls: string[]) {
   referenceItems.value.forEach((item) => revokeObjectUrl(item.objectUrl));
   referenceItems.value = urls.map((url, index) => ({
@@ -1002,6 +1009,8 @@ function addLibraryAssetToReference(asset: UserAsset) {
     localUrl: asset.thumb_url || asset.image_url,
     remoteUrl: asset.image_url,
     status: "success",
+    fileName: asset.file_name,
+    assetId: asset.id,
   });
   if (shouldAutoDetect) {
     void maybeAutoDetectAspectRatioFromFirstReference(asset.image_url);
@@ -1024,6 +1033,62 @@ function isImageUploadTooLarge(file: File) {
   return file.size > MAX_REFERENCE_FILE_SIZE;
 }
 
+function canAddReferenceToLibrary(item: UploadPreviewItem) {
+  return item.status === "success" && !!item.remoteUrl && !item.assetId;
+}
+
+function inferReferenceFileName(item: UploadPreviewItem) {
+  const named = item.fileName?.trim();
+  if (named) return named.slice(0, 255);
+  try {
+    const pathname = new URL(item.remoteUrl, window.location.origin).pathname;
+    const name = pathname.split("/").filter(Boolean).pop();
+    if (name) {
+      try {
+        return decodeURIComponent(name).slice(0, 255);
+      } catch {
+        return name.slice(0, 255);
+      }
+    }
+  } catch {
+    // ignore malformed urls and fall back to a generic name
+  }
+  return "参考图.png";
+}
+
+async function addReferenceToAssetLibrary(item: UploadPreviewItem) {
+  if (!canAddReferenceToLibrary(item) || item.savingToAsset) return;
+  if (!(await ensureAuthenticated())) return;
+
+  const quota = await getUserAssetStats();
+  if (quota.remaining <= 0) {
+    message.warning(getAssetQuotaFullMessage(quota));
+    return;
+  }
+
+  updateReferenceItem(item.id, { savingToAsset: true });
+  try {
+    const res = await importUserAssetFromUrl({
+      imageUrl: item.remoteUrl,
+      fileName: inferReferenceFileName(item),
+    });
+    updateReferenceItem(item.id, {
+      savingToAsset: false,
+      assetId: res.asset.id,
+      fileName: res.asset.file_name || item.fileName,
+    });
+    message.success("已加入我的素材");
+  } catch (err) {
+    updateReferenceItem(item.id, { savingToAsset: false });
+    const quotaMessage = resolveAssetQuotaErrorMessage(err);
+    if (quotaMessage) {
+      message.warning(quotaMessage);
+      return;
+    }
+    message.error("加入素材库失败，请重试");
+  }
+}
+
 async function uploadReferenceFiles(files: File[]) {
   const imageFiles = files.filter((file) => isReferenceImageFile(file));
   if (!imageFiles.length) {
@@ -1039,30 +1104,17 @@ async function uploadReferenceFiles(files: File[]) {
     return;
   }
 
-  const quota = await getUserAssetStats();
-  if (quota.remaining <= 0) {
-    message.warning(getAssetQuotaFullMessage(quota));
-    return;
-  }
-
-  const referenceLimitedFiles = imageFiles.slice(0, remainingSlots);
-  const acceptedFiles = referenceLimitedFiles.slice(0, quota.remaining);
-  const skippedDueToModel = imageFiles.length - referenceLimitedFiles.length;
-  const skippedDueToQuota = referenceLimitedFiles.length - acceptedFiles.length;
-
-  if (skippedDueToModel > 0) {
-    message.warning(`当前模型最多支持 ${maxReferenceImages.value} 张参考图，本次仅上传前 ${referenceLimitedFiles.length} 张`);
-  }
-  if (skippedDueToQuota > 0) {
-    message.warning(getAssetQuotaTruncatedMessage(acceptedFiles.length, quota.remaining));
+  const acceptedFiles = imageFiles.slice(0, remainingSlots);
+  if (imageFiles.length > acceptedFiles.length) {
+    message.warning(`当前模型最多支持 ${maxReferenceImages.value} 张参考图，本次仅上传前 ${acceptedFiles.length} 张`);
   }
   if (!acceptedFiles.length) return;
 
   let uploadedCount = 0;
   let failedCount = 0;
   let oversizedCount = 0;
-  let quotaErrorShown = false;
   let shouldAutoDetectFirstReference = referenceItems.value.length === 0;
+  const { uploadReferenceImage } = await import("@/api/upload");
 
   for (const file of acceptedFiles) {
     if (isImageUploadTooLarge(file)) {
@@ -1077,16 +1129,17 @@ async function uploadReferenceFiles(files: File[]) {
       remoteUrl: "",
       status: "uploading",
       objectUrl,
+      fileName: file.name,
     };
     referenceItems.value.push(item);
 
     try {
-      const res = await uploadUserAssetFile(file);
+      const res = await uploadReferenceImage(file, "ref");
       revokeObjectUrl(objectUrl);
       updateReferenceItem(item.id, {
         objectUrl: undefined,
-        localUrl: res.asset.thumb_url || res.asset.image_url,
-        remoteUrl: res.asset.image_url,
+        localUrl: res.url,
+        remoteUrl: res.url,
         status: "success",
       });
       uploadedCount += 1;
@@ -1094,15 +1147,9 @@ async function uploadReferenceFiles(files: File[]) {
         shouldAutoDetectFirstReference = false;
         void maybeAutoDetectAspectRatioFromFirstReference(file);
       }
-    } catch (err: any) {
+    } catch {
       updateReferenceItem(item.id, { status: "failed" });
       failedCount += 1;
-      const quotaMessage = resolveAssetQuotaErrorMessage(err);
-      if (quotaMessage) {
-        message.warning(quotaMessage);
-        quotaErrorShown = true;
-        break;
-      }
     }
   }
 
@@ -1112,7 +1159,7 @@ async function uploadReferenceFiles(files: File[]) {
   if (oversizedCount > 0) {
     message.warning(`${oversizedCount} 张图片超过 ${MAX_IMAGE_UPLOAD_SIZE_TEXT}，已跳过`);
   }
-  if (failedCount > 0 && !quotaErrorShown) {
+  if (failedCount > 0) {
     message.error(`${failedCount} 张参考图上传失败，请重试`);
   }
 }
@@ -2743,8 +2790,23 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                       <span v-else>上传失败</span>
                     </div>
                     <button
+                      v-if="canAddReferenceToLibrary(item)"
                       type="button"
-                      class="thumb-remove"
+                      class="thumb-action thumb-add"
+                      :class="{ 'is-busy': item.savingToAsset }"
+                      aria-label="加入我的素材"
+                      @click.stop="addReferenceToAssetLibrary(item)"
+                    >
+                      <a-tooltip title="加入我的素材" placement="top" :get-popup-container="getBodyPopupContainer">
+                        <span class="thumb-action-icon">
+                          <LoadingOutlined v-if="item.savingToAsset" />
+                          <PlusOutlined v-else />
+                        </span>
+                      </a-tooltip>
+                    </button>
+                    <button
+                      type="button"
+                      class="thumb-action thumb-remove"
                       aria-label="删除参考图"
                       @click.stop="removeReference(idx)"
                     >
@@ -4272,10 +4334,9 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   }
 }
 
-.thumb-remove {
+.thumb-action {
   position: absolute;
   top: 6px;
-  right: 6px;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -4298,15 +4359,32 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
     background var(--motion-duration-fast) var(--motion-ease-soft);
 }
 
-.generate-config-panel .upload-thumb:hover .thumb-remove,
-.generate-config-panel .upload-thumb:focus-within .thumb-remove {
+.thumb-add {
+  left: 6px;
+}
+
+.thumb-remove {
+  right: 6px;
+}
+
+.generate-config-panel .upload-thumb:hover .thumb-action,
+.generate-config-panel .upload-thumb:focus-within .thumb-action,
+.thumb-action.is-busy {
   opacity: 1;
   transform: scale(1);
 }
 
-.thumb-remove:hover,
-.thumb-remove:focus-visible {
+.thumb-action:hover,
+.thumb-action:focus-visible {
   background: rgba(0, 0, 0, 0.92);
+}
+
+.thumb-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 .generate-config-panel .upload-add {

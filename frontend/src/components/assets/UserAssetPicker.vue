@@ -771,7 +771,7 @@ function handleAssetDragStart(event: DragEvent, asset: UserAsset) {
             </div>
             <div v-else class="asset-empty">
               <div class="asset-empty-title">暂无素材</div>
-              <div class="asset-empty-desc">上传参考图后会永久保存到素材库，可在 AI 生图页复用。每个用户最多可保存 50 个素材。</div>
+              <div class="asset-empty-desc">可在此上传素材，或在 AI 生图页将参考图加入素材库。每个用户最多可保存 50 个素材。</div>
             </div>
           </div>
         </div>
