@@ -692,6 +692,7 @@ watch(filterSignature, async () => {
       :loading="detailLoading"
       :model-options="modelOptions"
       show-error-message
+      show-attempt-response-preview
       @update:open="detailOpen = $event"
     />
     <a-modal

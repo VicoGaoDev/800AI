@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<{
   loading?: boolean;
   showActions?: boolean;
   showErrorMessage?: boolean;
+  showAttemptResponsePreview?: boolean;
   hideCreditCost?: boolean;
   requestPreviewLoading?: boolean;
   modelOptions?: Array<{ label: string; value: string }>;
@@ -33,6 +34,7 @@ const props = withDefaults(defineProps<{
   loading: false,
   showActions: false,
   showErrorMessage: false,
+  showAttemptResponsePreview: false,
   hideCreditCost: false,
   requestPreviewLoading: false,
   modelOptions: () => [],
@@ -430,8 +432,17 @@ function handleDownload(item: UserHistoryCard) {
                   <span>接口：{{ attempt.api_config_name || "-" }}</span>
                   <span>HTTP：{{ typeof attempt.http_status === "number" ? attempt.http_status : "-" }}</span>
                   <span>耗时：{{ formatDuration(attempt.duration_ms) }}</span>
+                  <span>第三方响应：{{ formatDuration(attempt.external_http_ms) }}</span>
+                  <span>结果下载：{{ formatDuration(attempt.result_download_ms) }}</span>
+                  <span>COS上传：{{ formatDuration(attempt.cos_upload_ms) }}</span>
                 </div>
-                <div v-if="attempt.error_message" class="detail-attempt-error">{{ attempt.error_message }}</div>
+                <div v-if="showErrorMessage && attempt.error_message" class="detail-attempt-error">{{ attempt.error_message }}</div>
+                <div v-if="showAttemptResponsePreview && attempt.response_preview" class="detail-request-field detail-attempt-response-preview">
+                  <div class="detail-request-field-head">
+                    <span class="detail-request-label">响应体摘要</span>
+                  </div>
+                  <pre>{{ attempt.response_preview }}</pre>
+                </div>
               </div>
             </div>
           </div>
@@ -777,6 +788,10 @@ function handleDownload(item: UserHistoryCard) {
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.detail-attempt-response-preview {
+  margin-top: 10px;
 }
 
 .api-tag-danger {
