@@ -24,6 +24,7 @@ from app.schemas.external_api_config import (
     RenderedExternalApiConfig,
     TaskSceneConfigOut,
 )
+from app.services.cos_service import load_image_bytes
 
 SCENE_BANANA = "banana"
 SCENE_BANANA2 = "banana2"
@@ -46,7 +47,9 @@ PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 _MISSING_PLACEHOLDER = object()
 MULTIPART_EDIT_FILE_FIELD_ALIASES = {
     "image": "image",
+    "image[]": "image[]",
     "images": "image",
+    "images[]": "image[]",
     "mask": "mask",
 }
 MULTIPART_EDIT_FILE_FIELDS = set(MULTIPART_EDIT_FILE_FIELD_ALIASES)
@@ -978,6 +981,15 @@ def _decode_multipart_file_value(value: Any) -> tuple[bytes, str] | None:
             decoded = _decode_data_url(data_url_value)
             if decoded:
                 return decoded
+
+        file_url_value = value.get("file_url") or value.get("fileUri") or value.get("url")
+        if isinstance(file_url_value, str) and file_url_value.strip():
+            decoded = load_image_bytes(file_url_value.strip())
+            if not decoded:
+                return None
+            raw, detected_mime = decoded
+            mime_type = str(value.get("mime_type") or value.get("mimeType") or "").strip() or detected_mime
+            return raw, mime_type
 
         inline_data = value.get("inlineData")
         if isinstance(inline_data, dict):
