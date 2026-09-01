@@ -1362,6 +1362,8 @@ function copySecret(value: string, label: string) {
                 :value="record.api_config_id ?? undefined"
                 class="warm-select"
                 allow-clear
+                show-search
+                option-filter-prop="label"
                 placeholder="请选择主接口"
                 style="width: 280px"
                 :loading="bindingSavingKey === record.scene_key"
@@ -1371,6 +1373,7 @@ function copySecret(value: string, label: string) {
                   v-for="option in getBindingOptions()"
                   :key="option.value"
                   :value="option.value"
+                  :label="option.label"
                 >
                   {{ option.label }}
                 </a-select-option>
@@ -1381,6 +1384,8 @@ function copySecret(value: string, label: string) {
                 :value="record.backup_api_config_id ?? undefined"
                 class="warm-select"
                 allow-clear
+                show-search
+                option-filter-prop="label"
                 placeholder="请选择备用接口"
                 style="width: 280px"
                 :loading="bindingSavingKey === record.scene_key"
@@ -1390,6 +1395,7 @@ function copySecret(value: string, label: string) {
                   v-for="option in getBindingOptions()"
                   :key="option.value"
                   :value="option.value"
+                  :label="option.label"
                 >
                   {{ option.label }}
                 </a-select-option>
@@ -1645,12 +1651,15 @@ function copySecret(value: string, label: string) {
             v-model:value="sceneForm.api_config_id"
             class="warm-select"
             allow-clear
+            show-search
+            option-filter-prop="label"
             placeholder="可选，创建后也可在列表中再绑定"
           >
             <a-select-option
               v-for="option in getBindingOptions()"
               :key="option.value"
               :value="option.value"
+              :label="option.label"
             >
               {{ option.label }}
             </a-select-option>
@@ -1662,12 +1671,15 @@ function copySecret(value: string, label: string) {
             v-model:value="sceneForm.backup_api_config_id"
             class="warm-select"
             allow-clear
+            show-search
+            option-filter-prop="label"
             placeholder="可选，主接口生成失败时自动切换"
           >
             <a-select-option
               v-for="option in getBindingOptions()"
               :key="option.value"
               :value="option.value"
+              :label="option.label"
             >
               {{ option.label }}
             </a-select-option>

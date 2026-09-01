@@ -13,6 +13,7 @@ import type {
   AdminConfig,
   CosConfig,
   AdminUser,
+  AdminUserListResponse,
   AdminPaymentOrder,
   CreditLog,
   AdminRedeemKey,
@@ -62,8 +63,19 @@ export function listUsers(): Promise<AdminUser[]> {
   return client.get("/admin/users");
 }
 
-export function listUserOptions(): Promise<AdminUser[]> {
-  return client.get("/admin/user-options");
+export function listUsersPage(params: {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  status?: "active" | "disabled";
+  whitelist?: boolean;
+  sort?: "created_at_desc" | "credits_desc" | "consumed_credits_desc" | "whitelist_desc";
+}): Promise<AdminUserListResponse> {
+  return client.get("/admin/users/page", { params });
+}
+
+export function listUserOptions(params?: { keyword?: string; limit?: number }): Promise<AdminUser[]> {
+  return client.get("/admin/user-options", { params });
 }
 
 export function getAdminUserDetail(userId: string): Promise<AdminUser> {

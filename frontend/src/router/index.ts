@@ -167,6 +167,12 @@ const router = createRouter({
           props: { adminUserTasks: true },
         },
         {
+          path: "admin/overview",
+          name: "AdminOverviewStats",
+          meta: { requiresAdmin: true },
+          component: () => import("@/views/admin/OverviewStatsView.vue"),
+        },
+        {
           path: "admin/dashboard",
           name: "Dashboard",
           meta: { requiresAdmin: true },

@@ -19,9 +19,16 @@ class UserOut(BaseModel):
     remark: str = ""
     credits: int = 0
     consumed_credits: int = 0
+    is_first_admin: bool = False
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class UserListResponse(BaseModel):
+    total: int
+    whitelisted_total: int = 0
+    items: list[UserOut]
 
 
 class AllocateCreditsRequest(BaseModel):

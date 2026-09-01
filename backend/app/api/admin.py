@@ -7,7 +7,7 @@ from app.database import get_db
 from app.api.deps import require_admin, require_superadmin
 from app.models.user import User
 from app.schemas.admin import (
-    CreateUserRequest, UserOut, UpdateStatusRequest, UpdateRoleRequest,
+    CreateUserRequest, UserOut, UserListResponse, UpdateStatusRequest, UpdateRoleRequest,
     UpdateWhitelistRequest, UpdateRemarkRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
     CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest, PaymentOrderAdminOut,
     AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut,
@@ -23,7 +23,7 @@ from app.schemas.feedback import (
 from app.schemas.history import HistoryResponse, UserHistoryCardItem, UserHistoryResponse
 from app.services.business_id_service import get_user_by_business_id
 from app.services.admin_service import (
-    create_user, list_users, list_user_options, get_user_detail, update_user_status, update_user_role,
+    create_user, list_users, list_users_page, list_user_options, get_user_detail, update_user_status, update_user_role,
     update_user_whitelist, update_user_remark, reset_user_password, get_stats, allocate_credits, reset_user_credits, get_credit_logs,
     list_payment_orders,
     get_analytics_summary, get_analytics_timeseries, get_analytics_breakdown, get_analytics_redeem_revenue,
@@ -73,6 +73,28 @@ def admin_list_users(
     db: Session = Depends(get_db),
 ):
     return list_users(db)
+
+
+@router.get("/users/page", response_model=UserListResponse)
+def admin_list_users_page(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100),
+    keyword: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(active|disabled)$"),
+    whitelist: Optional[bool] = Query(None),
+    sort: str = Query("created_at_desc", pattern="^(created_at_desc|credits_desc|consumed_credits_desc|whitelist_desc)$"),
+    _user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return list_users_page(
+        db,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        status_filter=status_filter,
+        whitelist_filter=whitelist,
+        sort=sort,
+    )
 
 
 @router.get("/user-options", response_model=list[UserOut])

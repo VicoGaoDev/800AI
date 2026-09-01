@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from fastapi import HTTPException, status
 from app.models.user import User
+from app.models.user_credit import DEFAULT_USER_CREDIT_STATUS, UserCredit
 from app.models.task import Task
 from app.models.task_api_attempt import TaskApiAttempt
 from app.models.credit_log import CreditLog
@@ -182,6 +183,153 @@ def list_users(db: Session) -> list[dict]:
         )
         for user in users
     ]
+
+
+def list_users_page(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 30,
+    keyword: str | None = None,
+    status_filter: str | None = None,
+    whitelist_filter: bool | None = None,
+    sort: str = "created_at_desc",
+) -> dict:
+    normalized_page = max(1, int(page or 1))
+    normalized_page_size = max(1, min(int(page_size or 30), 100))
+    query = db.query(User).filter(User.role != "superadmin")
+
+    normalized_keyword = (keyword or "").strip()
+    if normalized_keyword:
+        keyword_like = f"%{normalized_keyword}%"
+        query = query.filter(or_(
+            User.username.ilike(keyword_like),
+            User.email.ilike(keyword_like),
+            User.business_id.ilike(keyword_like),
+        ))
+    if status_filter in ("active", "disabled"):
+        query = query.filter(User.status == status_filter)
+    if whitelist_filter is not None:
+        query = query.filter(User.is_whitelisted.is_(bool(whitelist_filter)))
+
+    total = query.count()
+    whitelisted_total = (
+        db.query(func.count(User.id))
+        .filter(User.role != "superadmin", User.is_whitelisted.is_(True))
+        .scalar()
+        or 0
+    )
+    first_admin_id = _get_first_admin_id(db)
+
+    if sort == "credits_desc":
+        query = (
+            query
+            .outerjoin(
+                UserCredit,
+                and_(
+                    UserCredit.user_id == User.id,
+                    UserCredit.type == 0,
+                    UserCredit.status == DEFAULT_USER_CREDIT_STATUS,
+                ),
+            )
+            .order_by(func.coalesce(UserCredit.remain_credit, 0).desc(), User.created_at.desc())
+        )
+    elif sort == "consumed_credits_desc":
+        refunded_subquery = (
+            db.query(
+                CreditLog.user_id.label("user_id"),
+                func.coalesce(func.sum(CreditLog.amount), 0).label("refunded_credits"),
+            )
+            .filter(
+                CreditLog.task_id.is_not(None),
+                CreditLog.type == "allocate",
+                CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+            )
+            .group_by(CreditLog.user_id)
+            .subquery()
+        )
+        consumed_subquery = (
+            db.query(
+                CreditLog.user_id.label("user_id"),
+                (
+                    func.coalesce(func.sum(func.abs(CreditLog.amount)), 0)
+                    - func.coalesce(refunded_subquery.c.refunded_credits, 0)
+                ).label("consumed_credits"),
+            )
+            .outerjoin(refunded_subquery, refunded_subquery.c.user_id == CreditLog.user_id)
+            .filter(CreditLog.type == "consume")
+            .group_by(CreditLog.user_id, refunded_subquery.c.refunded_credits)
+            .subquery()
+        )
+        query = (
+            query
+            .outerjoin(consumed_subquery, consumed_subquery.c.user_id == User.id)
+            .order_by(func.coalesce(consumed_subquery.c.consumed_credits, 0).desc(), User.created_at.desc())
+        )
+    elif sort == "whitelist_desc":
+        query = query.order_by(User.is_whitelisted.desc(), User.created_at.desc())
+    else:
+        query = query.order_by(User.created_at.desc())
+
+    users = (
+        query
+        .offset((normalized_page - 1) * normalized_page_size)
+        .limit(normalized_page_size)
+        .all()
+    )
+    user_ids = [user.id for user in users]
+    credit_map = get_user_credits_map(db, user_ids)
+    consumed_credit_rows = (
+        db.query(
+            CreditLog.user_id,
+            func.coalesce(func.sum(func.abs(CreditLog.amount)), 0).label("consumed_credits"),
+        )
+        .filter(
+            CreditLog.user_id.in_(user_ids),
+            CreditLog.type == "consume",
+        )
+        .group_by(CreditLog.user_id)
+        .all()
+    ) if user_ids else []
+    refunded_credit_rows = (
+        db.query(
+            CreditLog.user_id,
+            func.coalesce(func.sum(CreditLog.amount), 0).label("refunded_credits"),
+        )
+        .filter(
+            CreditLog.user_id.in_(user_ids),
+            CreditLog.task_id.is_not(None),
+            CreditLog.type == "allocate",
+            CreditLog.description.in_(TASK_CREDIT_REFUND_DESCRIPTIONS),
+        )
+        .group_by(CreditLog.user_id)
+        .all()
+    ) if user_ids else []
+    refunded_credit_map = {
+        int(row.user_id): int(row.refunded_credits or 0)
+        for row in refunded_credit_rows
+    }
+    consumed_credit_map = {
+        int(row.user_id): max(
+            int(row.consumed_credits or 0) - refunded_credit_map.get(int(row.user_id), 0),
+            0,
+        )
+        for row in consumed_credit_rows
+    }
+    items = []
+    for user in users:
+        item = _serialize_user_with_balance(
+            user,
+            credit_map.get(user.id, 0),
+            consumed_credit_map.get(user.id, 0),
+        )
+        item["is_first_admin"] = first_admin_id == user.id
+        items.append(item)
+    return {
+        "total": total,
+        "whitelisted_total": int(whitelisted_total),
+        "items": items,
+    }
 
 
 def list_user_options(db: Session, keyword: str | None = None, limit: int = 2000) -> list[dict]:

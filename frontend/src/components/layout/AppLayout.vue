@@ -43,6 +43,7 @@ import {
   SettingOutlined,
   TeamOutlined,
   BarChartOutlined,
+  DashboardOutlined,
   BugOutlined,
   KeyOutlined,
   CloudUploadOutlined,
@@ -90,6 +91,7 @@ const routeOrder = new Map<string, number>([
   ["/admin/prompt-optimize", 14.5],
   ["/admin/users", 15],
   ["/admin/user-tasks", 16],
+  ["/admin/overview", 16.5],
   ["/admin/dashboard", 17],
   ["/admin/error-analytics", 18],
   ["/admin/general-settings", 19],
@@ -139,6 +141,7 @@ const adminMenuItems = computed(() =>
     { key: "/admin/prompt-optimize", label: "提示词优化", icon: ThunderboltOutlined, superAdminOnly: false },
     { key: "/admin/users", label: "用户管理", icon: TeamOutlined, superAdminOnly: false },
     { key: "/admin/user-tasks", label: "用户任务", icon: PictureOutlined, superAdminOnly: false },
+    { key: "/admin/overview", label: "固定概览", icon: DashboardOutlined, superAdminOnly: false },
     { key: "/admin/dashboard", label: "数据统计", icon: BarChartOutlined, superAdminOnly: false },
     { key: "/admin/error-analytics", label: "错误统计", icon: BugOutlined, superAdminOnly: false },
     { key: "/admin/general-settings", label: "通用设置", icon: SettingOutlined, superAdminOnly: false },
@@ -151,29 +154,36 @@ const adminMenuItems = computed(() =>
     { key: "/admin/external-api-configs", label: "接口管理", icon: KeyOutlined, superAdminOnly: true },
   ].filter((item) => !item.superAdminOnly || isSuperAdmin.value)
 );
-const adminMenuBaseItems = computed(() =>
-  adminMenuItems.value.filter((item) => [
-    "/admin/templates",
-    "/admin/prompt-optimize",
-    "/admin/users",
-    "/admin/user-tasks",
-    "/admin/dashboard",
-    "/admin/error-analytics",
-    "/admin/general-settings",
-  ].includes(item.key))
-);
-const adminMenuBusinessItems = computed(() =>
-  adminMenuItems.value.filter((item) => [
-    "/admin/redeem-keys",
-    "/admin/payment-orders",
-    "/admin/invite-rewards",
-  ].includes(item.key))
-);
-const adminMenuNoticeItems = computed(() =>
-  adminMenuItems.value.filter((item) => ["/admin/feedbacks", "/admin/system-messages"].includes(item.key))
-);
-const adminMenuConfigItems = computed(() =>
-  adminMenuItems.value.filter((item) => ["/admin/cos-config", "/admin/external-api-configs"].includes(item.key))
+const adminMenuGroups = computed(() =>
+  [
+    {
+      key: "admin-templates",
+      label: "模版管理",
+      icon: PictureOutlined,
+      itemKeys: ["/admin/templates", "/admin/prompt-optimize"],
+    },
+    {
+      key: "admin-users",
+      label: "用户数据",
+      icon: TeamOutlined,
+      itemKeys: ["/admin/users", "/admin/user-tasks", "/admin/feedbacks", "/admin/system-messages"],
+    },
+    {
+      key: "admin-analytics",
+      label: "数据统计",
+      icon: BarChartOutlined,
+      itemKeys: ["/admin/overview", "/admin/dashboard", "/admin/error-analytics", "/admin/redeem-keys", "/admin/payment-orders", "/admin/invite-rewards"],
+    },
+    {
+      key: "admin-third-party",
+      label: "第三方管理",
+      icon: KeyOutlined,
+      itemKeys: ["/admin/general-settings", "/admin/cos-config", "/admin/external-api-configs"],
+    },
+  ].map((group) => ({
+    ...group,
+    items: adminMenuItems.value.filter((item) => group.itemKeys.includes(item.key)),
+  })).filter((group) => group.items.length > 0)
 );
 
 const hasAdminUnresolvedFeedback = computed(() => adminUnresolvedFeedbackCount.value > 0);
@@ -1069,7 +1079,7 @@ watch(purchaseDialogOpen, (open) => {
             邀请奖励
           </a-button>
           <div v-if="auth.isLoggedIn && isAdmin" class="desktop-admin-entry">
-            <a-dropdown :trigger="['hover']" overlay-class-name="warm-dropdown">
+            <a-dropdown :trigger="['hover']" overlay-class-name="warm-dropdown admin-cascade-dropdown">
               <a-badge :count="adminUnresolvedFeedbackCount" :offset="[-2, 2]" :show-zero="false">
                 <a-button class="admin-btn" type="text" shape="circle" aria-label="admin-menu">
                   <template #icon><SettingOutlined /></template>
@@ -1077,48 +1087,29 @@ watch(purchaseDialogOpen, (open) => {
               </a-badge>
               <template #overlay>
                 <a-menu :selected-keys="adminSelectedKeys" @click="handleAdminMenu">
-                  <a-menu-item
-                    v-for="item in adminMenuBaseItems"
-                    :key="item.key"
-                  >
-                    <component :is="item.icon" />
-                    <span style="margin-left: 8px">{{ item.label }}</span>
-                  </a-menu-item>
-                  <a-menu-divider />
-                  <a-menu-item
-                    v-for="item in adminMenuBusinessItems"
-                    :key="item.key"
-                  >
-                    <component :is="item.icon" />
-                    <span style="margin-left: 8px">{{ item.label }}</span>
-                  </a-menu-item>
-                  <a-menu-divider />
-                  <a-menu-item
-                    v-for="item in adminMenuNoticeItems"
-                    :key="item.key"
-                    :class="{ 'admin-feedback-dropdown-item': item.key === '/admin/feedbacks' }"
-                  >
-                    <component :is="item.icon" />
-                    <span v-if="item.key === '/admin/feedbacks'" class="admin-menu-feedback-label">
-                      <span>{{ item.label }}</span>
-                      <a-badge
-                        v-if="hasAdminUnresolvedFeedback"
-                        :count="adminUnresolvedFeedbackCount"
-                        :number-style="{ backgroundColor: '#ff4d4f', color: '#fff' }"
-                      />
-                    </span>
-                    <span v-else style="margin-left: 8px">{{ item.label }}</span>
-                  </a-menu-item>
-                  <template v-if="adminMenuConfigItems.length">
-                    <a-menu-divider />
+                  <a-sub-menu v-for="group in adminMenuGroups" :key="group.key" popup-class-name="admin-cascade-submenu">
+                    <template #title>
+                      <component :is="group.icon" />
+                      <span style="margin-left: 8px">{{ group.label }}</span>
+                    </template>
                     <a-menu-item
-                      v-for="item in adminMenuConfigItems"
+                      v-for="item in group.items"
                       :key="item.key"
+                      :class="{ 'admin-feedback-dropdown-item': item.key === '/admin/feedbacks' }"
                     >
                       <component :is="item.icon" />
-                      <span style="margin-left: 8px">{{ item.label }}</span>
+                      <template v-if="item.key === '/admin/feedbacks'">
+                        <span class="admin-menu-feedback-label">{{ item.label }}</span>
+                        <a-badge
+                          v-if="hasAdminUnresolvedFeedback"
+                          class="admin-menu-feedback-badge"
+                          :count="adminUnresolvedFeedbackCount"
+                          :number-style="{ backgroundColor: '#ff4d4f', color: '#fff' }"
+                        />
+                      </template>
+                      <span v-else style="margin-left: 8px">{{ item.label }}</span>
                     </a-menu-item>
-                  </template>
+                  </a-sub-menu>
                 </a-menu>
               </template>
             </a-dropdown>
@@ -1335,35 +1326,29 @@ watch(purchaseDialogOpen, (open) => {
             class="mobile-drawer-menu"
             @click="handleAdminMenu"
           >
-            <a-menu-item v-for="item in adminMenuBaseItems" :key="item.key">
-              <component :is="item.icon" />
-              <span>{{ item.label }}</span>
-            </a-menu-item>
-            <a-menu-divider />
-            <a-menu-item v-for="item in adminMenuBusinessItems" :key="item.key">
-              <component :is="item.icon" />
-              <span>{{ item.label }}</span>
-            </a-menu-item>
-            <a-menu-divider />
-            <a-menu-item v-for="item in adminMenuNoticeItems" :key="item.key">
-              <component :is="item.icon" />
-              <span v-if="item.key === '/admin/feedbacks'" class="admin-menu-feedback-label">
-                <span>{{ item.label }}</span>
-                <a-badge
-                  v-if="hasAdminUnresolvedFeedback"
-                  :count="adminUnresolvedFeedbackCount"
-                  :number-style="{ backgroundColor: '#ff4d4f', color: '#fff' }"
-                />
-              </span>
-              <span v-else>{{ item.label }}</span>
-            </a-menu-item>
-            <template v-if="adminMenuConfigItems.length">
-              <a-menu-divider />
-              <a-menu-item v-for="item in adminMenuConfigItems" :key="item.key">
+            <a-sub-menu v-for="group in adminMenuGroups" :key="group.key">
+              <template #title>
+                <component :is="group.icon" />
+                <span>{{ group.label }}</span>
+              </template>
+              <a-menu-item
+                v-for="item in group.items"
+                :key="item.key"
+                :class="{ 'admin-feedback-dropdown-item': item.key === '/admin/feedbacks' }"
+              >
                 <component :is="item.icon" />
-                <span>{{ item.label }}</span>
+                <template v-if="item.key === '/admin/feedbacks'">
+                  <span class="admin-menu-feedback-label">{{ item.label }}</span>
+                  <a-badge
+                    v-if="hasAdminUnresolvedFeedback"
+                    class="admin-menu-feedback-badge"
+                    :count="adminUnresolvedFeedbackCount"
+                    :number-style="{ backgroundColor: '#ff4d4f', color: '#fff' }"
+                  />
+                </template>
+                <span v-else>{{ item.label }}</span>
               </a-menu-item>
-            </template>
+            </a-sub-menu>
           </a-menu>
         </div>
 
@@ -2267,11 +2252,11 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
 
 .admin-menu-feedback-label {
   margin-left: 8px;
-  width: 100%;
+  width: auto;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  flex: 0 1 auto;
   min-width: 0;
   flex-wrap: nowrap;
   white-space: nowrap;
@@ -3304,13 +3289,34 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
   white-space: nowrap;
 }
 
+.warm-dropdown .ant-dropdown-menu-item.admin-feedback-dropdown-item {
+  position: relative;
+}
+
 .warm-dropdown .ant-dropdown-menu-item.admin-feedback-dropdown-item .ant-dropdown-menu-title-content {
   min-width: 0;
   flex: 1 1 auto;
+  overflow: visible;
 }
 
 .warm-dropdown .ant-dropdown-menu-item.admin-feedback-dropdown-item .admin-menu-feedback-label {
   margin-left: 8px;
+}
+
+.admin-cascade-submenu .ant-dropdown-menu-item.admin-feedback-dropdown-item,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item.admin-feedback-dropdown-item,
+.mobile-drawer-menu .ant-menu-item.admin-feedback-dropdown-item {
+  position: relative;
+  padding-right: 58px !important;
+}
+
+.admin-cascade-submenu .ant-dropdown-menu-item.admin-feedback-dropdown-item .admin-menu-feedback-badge,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item.admin-feedback-dropdown-item .admin-menu-feedback-badge,
+.mobile-drawer-menu .ant-menu-item.admin-feedback-dropdown-item .admin-menu-feedback-badge {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .warm-dropdown .ant-dropdown-menu-item.user-feedback-dropdown-item,
@@ -3344,5 +3350,141 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .warm-dropdown .ant-dropdo
 .warm-dropdown .ant-dropdown-menu-item-divider {
   margin: 8px 2px;
   background: var(--theme-border);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu {
+  min-width: 218px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(238, 210, 165, 0.86);
+  background: rgba(255, 252, 244, 0.98);
+  box-shadow:
+    0 24px 48px rgba(128, 87, 31, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-title {
+  min-height: 48px;
+  margin: 0 0 4px;
+  padding: 0 16px !important;
+  border-radius: 12px;
+  color: #4f351e !important;
+  font-size: 16px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-soft),
+    color var(--motion-duration-fast) var(--motion-ease-soft),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-soft);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-title:hover,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-active > .ant-dropdown-menu-submenu-title {
+  background: linear-gradient(180deg, rgba(255, 246, 229, 0.96), rgba(255, 240, 211, 0.86)) !important;
+  color: #4f351e !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-title .anticon {
+  margin-right: 10px;
+  font-size: 17px;
+  color: currentColor;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-title .ant-dropdown-menu-title-content {
+  flex: 1 1 auto;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-expand-icon,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-arrow {
+  color: #4f351e !important;
+  font-size: 14px;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup,
+.admin-cascade-submenu {
+  padding-left: 6px;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu,
+.admin-cascade-submenu .ant-dropdown-menu {
+  min-width: 218px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(238, 210, 165, 0.88);
+  background: rgba(255, 252, 244, 0.98);
+  box-shadow:
+    0 24px 50px rgba(128, 87, 31, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item,
+.admin-cascade-submenu .ant-dropdown-menu-item {
+  min-height: 48px;
+  margin: 0 0 4px;
+  padding: 0 16px !important;
+  border-radius: 10px;
+  color: #4f351e !important;
+  font-size: 16px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item:last-child,
+.admin-cascade-submenu .ant-dropdown-menu-item:last-child {
+  margin-bottom: 0;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item .anticon,
+.admin-cascade-submenu .ant-dropdown-menu-item .anticon {
+  margin-right: 10px;
+  font-size: 17px;
+  color: currentColor;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item:hover,
+.admin-cascade-submenu .ant-dropdown-menu-item:hover {
+  transform: none;
+  background: rgba(255, 244, 222, 0.9) !important;
+  color: #4f351e !important;
+  box-shadow: none;
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item-selected,
+.admin-cascade-submenu .ant-dropdown-menu-item-selected {
+  background: linear-gradient(180deg, #ffb326, #ffa51d) !important;
+  color: #4f351e !important;
+  box-shadow: 0 10px 20px rgba(255, 171, 37, 0.2);
+}
+
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item-selected span,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item-selected a,
+.admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item-selected .ant-dropdown-menu-title-content,
+.admin-cascade-submenu .ant-dropdown-menu-item-selected span,
+.admin-cascade-submenu .ant-dropdown-menu-item-selected a,
+.admin-cascade-submenu .ant-dropdown-menu-item-selected .ant-dropdown-menu-title-content {
+  color: #4f351e !important;
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-submenu .ant-dropdown-menu {
+  border-color: rgba(255, 204, 128, 0.22);
+  background: rgba(39, 31, 24, 0.98);
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-title,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-submenu .ant-dropdown-menu-item {
+  color: #f6dfba !important;
+}
+
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-title:hover,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-active > .ant-dropdown-menu-submenu-title,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-dropdown .ant-dropdown-menu-submenu-popup .ant-dropdown-menu-item:hover,
+html:is([data-theme="dark"], [data-theme="midnight"]) .admin-cascade-submenu .ant-dropdown-menu-item:hover {
+  background: rgba(255, 188, 70, 0.14) !important;
+  color: #ffe0a3 !important;
 }
 </style>

@@ -38,12 +38,18 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  usersLoading: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits<{
   (e: "update:granularity", value: AdminAnalyticsGranularity): void;
   (e: "preset-change", value: string): void;
   (e: "reset"): void;
+  (e: "users-dropdown-visible", open: boolean): void;
+  (e: "users-search", value: string): void;
 }>();
 
 const presetOptions = computed(() => {
@@ -106,8 +112,11 @@ const presetOptions = computed(() => {
         placeholder="全部用户"
         allow-clear
         show-search
-        option-filter-prop="label"
+        :filter-option="false"
         class="analytics-filter-select"
+        :loading="usersLoading"
+        @dropdownVisibleChange="emit('users-dropdown-visible', $event)"
+        @search="emit('users-search', $event)"
       >
         <a-select-option
           v-for="user in users"

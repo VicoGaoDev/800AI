@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount, h, watch } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount, h, nextTick, watch } from "vue";
 import { message, Modal } from "ant-design-vue";
 import dayjs from "dayjs";
 import {
@@ -87,6 +87,8 @@ const promptFilter = ref("");
 const dateRangeFilter = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 const users = ref<AdminUser[]>([]);
 const usersLoading = ref(false);
+const defaultUserOptions = ref<AdminUser[]>([]);
+const userDropdownReady = ref(false);
 const generationModels = ref<GenerationModelOption[]>([]);
 const taskScenes = ref<TaskSceneConfig[]>([]);
 const detailOpen = ref(false);
@@ -120,6 +122,8 @@ const loadMoreAnchor = ref<HTMLElement | null>(null);
 const HISTORY_POLL_INTERVAL_MS = 10000;
 let historyPollTimer: number | null = null;
 let filterDebounceTimer: number | null = null;
+let userSearchTimer: number | null = null;
+let userOptionsRequestId = 0;
 let loadMoreObserver: IntersectionObserver | null = null;
 let activeDetailRequestKey = "";
 
@@ -378,25 +382,67 @@ async function loadModels() {
   }
 }
 
-async function loadUsers() {
-  if (!isAdminHistoryView.value || users.value.length || usersLoading.value) return;
+function mergeSelectedUserOptions(options: AdminUser[]) {
+  const selectedUser = users.value.find((item) => item.id === userFilter.value);
+  if (selectedUser && !options.some((item) => item.id === selectedUser.id)) {
+    return [selectedUser, ...options];
+  }
+  return options;
+}
+
+async function loadUsers(keyword = "") {
+  if (!isAdminHistoryView.value) return;
+  const normalizedKeyword = keyword.trim();
+  if (!normalizedKeyword && defaultUserOptions.value.length) {
+    users.value = mergeSelectedUserOptions(defaultUserOptions.value);
+    return;
+  }
+  const requestId = ++userOptionsRequestId;
   usersLoading.value = true;
   try {
-    users.value = (await listUserOptions()).filter((item) => !item.is_whitelisted);
+    const options = (await listUserOptions({
+      keyword: normalizedKeyword || undefined,
+      limit: 80,
+    })).filter((item) => !item.is_whitelisted);
+    if (requestId !== userOptionsRequestId) return;
+    if (!normalizedKeyword) defaultUserOptions.value = options;
+    users.value = mergeSelectedUserOptions(options);
   } catch {
-    users.value = [];
+    if (requestId !== userOptionsRequestId) return;
+    if (!normalizedKeyword) users.value = mergeSelectedUserOptions([]);
   } finally {
-    usersLoading.value = false;
+    if (requestId === userOptionsRequestId) {
+      usersLoading.value = false;
+    }
   }
 }
 
 function handleUserFilterDropdownVisible(open: boolean) {
-  if (open) void loadUsers();
+  if (!open || !userDropdownReady.value) return;
+  void loadUsers("");
+}
+
+function handleUserSearch(value: string) {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer);
+    userSearchTimer = null;
+  }
+  const normalizedKeyword = value.trim();
+  if (!normalizedKeyword) {
+    if (defaultUserOptions.value.length) {
+      users.value = mergeSelectedUserOptions(defaultUserOptions.value);
+    }
+    return;
+  }
+  userSearchTimer = window.setTimeout(() => {
+    void loadUsers(normalizedKeyword);
+  }, 250);
 }
 
 async function ensureSelectedUserOption() {
   const selectedUserId = userFilter.value;
   if (!isAdminHistoryView.value || !selectedUserId) return;
+  if (users.value.some((item) => item.id === selectedUserId)) return;
   try {
     const user = await getAdminUserDetail(selectedUserId);
     if (user.is_whitelisted) return;
@@ -411,11 +457,19 @@ async function ensureSelectedUserOption() {
 onMounted(loadHistory);
 onMounted(loadModels);
 onMounted(ensureSelectedUserOption);
+onMounted(async () => {
+  await nextTick();
+  userDropdownReady.value = true;
+});
 onBeforeUnmount(() => {
   stopHistoryPolling();
   if (filterDebounceTimer) {
     clearTimeout(filterDebounceTimer);
     filterDebounceTimer = null;
+  }
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer);
+    userSearchTimer = null;
   }
   loadMoreObserver?.disconnect();
   loadMoreObserver = null;
@@ -1085,9 +1139,10 @@ function handleEditImage(item: UserHistoryCard) {
         class="history-filter-control history-filter-select history-filter-select-user"
         allow-clear
         show-search
-        option-filter-prop="label"
+        :filter-option="false"
         :loading="usersLoading"
         @dropdownVisibleChange="handleUserFilterDropdownVisible"
+        @search="handleUserSearch"
       >
         <a-select-option
           v-for="user in users"

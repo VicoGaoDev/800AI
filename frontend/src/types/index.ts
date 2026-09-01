@@ -418,7 +418,14 @@ export interface AdminUser {
   remark?: string;
   credits: number;
   consumed_credits: number;
+  is_first_admin?: boolean;
   created_at: string;
+}
+
+export interface AdminUserListResponse {
+  total: number;
+  whitelisted_total: number;
+  items: AdminUser[];
 }
 
 export interface AdminUserPromoDashboard {

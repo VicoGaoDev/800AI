@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { message, notification } from "ant-design-vue";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
@@ -8,13 +8,13 @@ import { useRouter } from "vue-router";
 import { getGenerationModels, getTaskScenes } from "@/api/config";
 import {
   getAdminUnresolvedFeedbackCount,
-  getStats,
   getAdminAnalyticsBreakdown,
   getAdminAnalyticsSummary,
   getAdminAnalyticsTimeseries,
   getAdminHistoryDetail,
   getAdminHistory,
-  listUsers,
+  getAdminUserDetail,
+  listUserOptions,
 } from "@/api/admin";
 import { setStoredAdminUnresolvedFeedbackCount } from "@/lib/adminFeedbackNotice";
 import { isSessionExpiredError } from "@/lib/authError";
@@ -29,7 +29,6 @@ import type {
   AdminAnalyticsQuery,
   AdminAnalyticsSummary,
   AdminAnalyticsTimeseries,
-  AdminStats,
   AdminUser,
   GenerationModelOption,
   HistoryFilter,
@@ -42,13 +41,14 @@ import type {
 
 const router = useRouter();
 const analyticsLoading = ref(false);
-const statsLoading = ref(false);
 const historyLoading = ref(false);
-const stats = ref<AdminStats | null>(null);
 const summary = ref<AdminAnalyticsSummary | null>(null);
 const timeseries = ref<AdminAnalyticsTimeseries | null>(null);
 const breakdown = ref<AdminAnalyticsBreakdown | null>(null);
 const users = ref<AdminUser[]>([]);
+const usersLoading = ref(false);
+const defaultUserOptions = ref<AdminUser[]>([]);
+const userDropdownReady = ref(false);
 const generationModels = ref<GenerationModelOption[]>([]);
 const taskScenes = ref<TaskSceneConfig[]>([]);
 const history = ref<HistoryItem[]>([]);
@@ -64,6 +64,8 @@ const detailItem = ref<UserHistoryCard | null>(null);
 const creditDialogOpen = ref(false);
 const creditDialogUser = ref<AdminUser | null>(null);
 let activeDetailRequestKey = "";
+let userSearchTimer: number | null = null;
+let userOptionsRequestId = 0;
 const HISTORY_PAGE_SIZE = 20;
 const HISTORY_TABLE_SCROLL_X = 1400;
 const UNRESOLVED_FEEDBACK_NOTIFICATION_KEY = "admin-unresolved-feedback";
@@ -128,40 +130,6 @@ const activeFilterSummary = computed(() => {
   }
   if (!chips.length && summary.value) chips.push(`统计范围：${summary.value.current_range_label}`);
   return chips;
-});
-
-const overviewStats = computed(() => {
-  if (!stats.value) return [];
-  return [
-    {
-      key: "total_tasks",
-      label: "所有时间总任务数",
-      value: stats.value.total_tasks,
-      desc: "累计发起的全部任务数量（含提示词反推）",
-      color: "#1890ff",
-    },
-    {
-      key: "total_credit_cost",
-      label: "所有时间总积分消耗",
-      value: stats.value.total_credit_cost,
-      desc: "累计任务实际扣减的积分总量（含提示词反推）",
-      color: "#722ed1",
-    },
-    {
-      key: "active_users",
-      label: "近 7 天活跃用户",
-      value: stats.value.active_users,
-      desc: "按最近 7 天内发起任务或提示词反推计算",
-      color: "#13c2c2",
-    },
-    {
-      key: "total_users",
-      label: "总用户数",
-      value: stats.value.total_users,
-      desc: "当前系统内非超级管理员用户",
-      color: "#fa8c16",
-    },
-  ];
 });
 
 const filterSignature = computed(() => JSON.stringify({
@@ -248,12 +216,60 @@ function formatQueryDate(value?: Dayjs) {
   return value ? value.format("YYYY-MM-DDTHH:mm:ss") : undefined;
 }
 
-async function loadUsers() {
-  try {
-    users.value = (await listUsers()).filter((item) => !item.is_whitelisted);
-  } catch {
-    users.value = [];
+function mergeSelectedUserOptions(options: AdminUser[]) {
+  const selectedUser = users.value.find((item) => item.id === filters.user_id);
+  if (selectedUser && !options.some((item) => item.id === selectedUser.id)) {
+    return [selectedUser, ...options];
   }
+  return options;
+}
+
+async function loadUsers(keyword = "") {
+  const normalizedKeyword = keyword.trim();
+  if (!normalizedKeyword && defaultUserOptions.value.length) {
+    users.value = mergeSelectedUserOptions(defaultUserOptions.value);
+    return;
+  }
+  const requestId = ++userOptionsRequestId;
+  usersLoading.value = true;
+  try {
+    const options = (await listUserOptions({
+      keyword: normalizedKeyword || undefined,
+      limit: 80,
+    })).filter((item) => !item.is_whitelisted);
+    if (requestId !== userOptionsRequestId) return;
+    if (!normalizedKeyword) defaultUserOptions.value = options;
+    users.value = mergeSelectedUserOptions(options);
+  } catch {
+    if (requestId !== userOptionsRequestId) return;
+    if (!normalizedKeyword) users.value = mergeSelectedUserOptions([]);
+  } finally {
+    if (requestId === userOptionsRequestId) {
+      usersLoading.value = false;
+    }
+  }
+}
+
+function handleUsersDropdownVisible(open: boolean) {
+  if (!open || !userDropdownReady.value) return;
+  void loadUsers("");
+}
+
+function handleUsersSearch(value: string) {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer);
+    userSearchTimer = null;
+  }
+  const normalizedKeyword = value.trim();
+  if (!normalizedKeyword) {
+    if (defaultUserOptions.value.length) {
+      users.value = mergeSelectedUserOptions(defaultUserOptions.value);
+    }
+    return;
+  }
+  userSearchTimer = window.setTimeout(() => {
+    void loadUsers(normalizedKeyword);
+  }, 250);
 }
 
 async function loadModels() {
@@ -284,18 +300,6 @@ async function loadAnalytics() {
     message.error("获取统计分析失败");
   } finally {
     analyticsLoading.value = false;
-  }
-}
-
-async function loadStatsData() {
-  statsLoading.value = true;
-  try {
-    stats.value = await getStats();
-  } catch (err: any) {
-    if (isSessionExpiredError(err)) return;
-    message.error("获取概览统计失败");
-  } finally {
-    statsLoading.value = false;
   }
 }
 
@@ -400,12 +404,13 @@ function handleBucketClick(payload: { start?: string | null; end?: string | null
   preset.value = "custom";
 }
 
-function handleBreakdownFilter(payload: { type: "status" | "source" | "mode" | "model" | "user"; value: string }) {
+async function handleBreakdownFilter(payload: { type: "status" | "source" | "mode" | "model" | "user"; value: string }) {
   if (payload.type === "status") filters.status = payload.value;
   if (payload.type === "source") filters.source = payload.value as TaskSource;
   if (payload.type === "mode") filters.mode = payload.value as TaskType;
   if (payload.type === "model") filters.model = payload.value;
   if (payload.type === "user") {
+    await loadUsers(payload.value);
     const matchedUser = users.value.find((item) => item.username === payload.value);
     if (matchedUser) filters.user_id = matchedUser.id;
   }
@@ -419,8 +424,19 @@ function findHistoryUser(record: HistoryItem) {
   return users.value.find((item) => item.username === record.username) || null;
 }
 
-function openCreditDialog(record: HistoryItem) {
-  const user = findHistoryUser(record);
+async function openCreditDialog(record: HistoryItem) {
+  let user = findHistoryUser(record);
+  if (!user && record.user_id) {
+    try {
+      const detail = await getAdminUserDetail(record.user_id);
+      user = detail;
+      if (!users.value.some((item) => item.id === detail.id)) {
+        users.value = [detail, ...users.value];
+      }
+    } catch {
+      user = null;
+    }
+  }
   if (!user) {
     message.warning("未找到该用户的积分信息");
     return;
@@ -496,9 +512,19 @@ function historyStatusSummary(record: HistoryItem) {
 onMounted(async () => {
   preset.value = defaultPresetByGranularity(granularity.value);
   applyPresetRange(preset.value);
-  await Promise.all([loadUsers(), loadModels()]);
-  await Promise.all([loadPageData(), loadStatsData(), checkUnresolvedFeedbacks()]);
+  await loadModels();
+  await Promise.all([loadPageData(), checkUnresolvedFeedbacks()]);
   ready.value = true;
+});
+onMounted(async () => {
+  await nextTick();
+  userDropdownReady.value = true;
+});
+onBeforeUnmount(() => {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer);
+    userSearchTimer = null;
+  }
 });
 
 watch(filterSignature, async () => {
@@ -533,34 +559,13 @@ watch(filterSignature, async () => {
       :granularity="granularity"
       :preset="preset"
       :loading="analyticsLoading || historyLoading"
+      :users-loading="usersLoading"
       @update:granularity="handleGranularityChange"
       @preset-change="handlePresetChange"
       @reset="handleReset"
+      @users-dropdown-visible="handleUsersDropdownVisible"
+      @users-search="handleUsersSearch"
     />
-
-    <section class="dashboard-section">
-      <div class="section-title-row">
-        <h3 class="section-title">固定概览</h3>
-        <span class="section-tip">这一组为固定口径统计，不随当前筛选条件变化。</span>
-      </div>
-      <a-spin :spinning="statsLoading">
-        <div class="overview-grid">
-          <div
-            v-for="(item, index) in overviewStats"
-            :key="item.key"
-            class="overview-card warm-card motion-card-lift motion-fade-up"
-            :style="{ '--motion-delay': `${160 + Math.min(index, 5) * 40}ms` }"
-          >
-            <div class="overview-card-head">
-              <span class="overview-card-label">{{ item.label }}</span>
-              <span class="overview-card-dot" :style="{ background: item.color }" />
-            </div>
-            <div class="overview-card-value" :style="{ color: item.color }">{{ item.value }}</div>
-            <div class="overview-card-desc">{{ item.desc }}</div>
-          </div>
-        </div>
-      </a-spin>
-    </section>
 
     <section class="dashboard-section">
       <div class="section-title-row">
@@ -738,54 +743,6 @@ watch(filterSignature, async () => {
 
 .dashboard-section {
   padding-top: 2px;
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-}
-
-.overview-card {
-  min-height: 116px;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.overview-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.overview-card-label {
-  color: #8c7458;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.overview-card-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  box-shadow: 0 0 0 4px rgba(255, 193, 90, 0.14);
-}
-
-.overview-card-value {
-  font-size: 30px;
-  line-height: 1.1;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.overview-card-desc {
-  color: #9a805b;
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .section-title-row {
