@@ -137,6 +137,9 @@ const sceneForm = reactive<ExternalApiSceneBindingCreatePayload>({
   hide_aspect_ratio: false,
   hide_resolution: false,
   hide_custom_size: true,
+  custom_size_min: 256,
+  custom_size_max: 3840,
+  custom_size_step: 8,
   api_config_id: null,
   backup_api_config_id: null,
   display_name: "",
@@ -157,6 +160,9 @@ const sceneMetaForm = reactive<ExternalApiSceneBindingMetaPayload>({
   hide_aspect_ratio: false,
   hide_resolution: false,
   hide_custom_size: true,
+  custom_size_min: 256,
+  custom_size_max: 3840,
+  custom_size_step: 8,
   max_reference_images: 0,
   aspect_ratio_options_json: DEFAULT_ASPECT_RATIO_OPTIONS_JSON,
   image_size_options_json: DEFAULT_IMAGE_SIZE_OPTIONS_JSON,
@@ -317,6 +323,9 @@ function resetSceneForm() {
   sceneForm.hide_aspect_ratio = false;
   sceneForm.hide_resolution = false;
   sceneForm.hide_custom_size = true;
+  sceneForm.custom_size_min = 256;
+  sceneForm.custom_size_max = 3840;
+  sceneForm.custom_size_step = 8;
   sceneForm.api_config_id = null;
   sceneForm.backup_api_config_id = null;
   sceneForm.display_name = "";
@@ -376,6 +385,9 @@ function fillSceneMetaForm(record: ExternalApiSceneBinding) {
   sceneMetaForm.hide_aspect_ratio = !!record.hide_aspect_ratio;
   sceneMetaForm.hide_resolution = !!record.hide_resolution;
   sceneMetaForm.hide_custom_size = !!record.hide_custom_size;
+  sceneMetaForm.custom_size_min = Number(record.custom_size_min || 256);
+  sceneMetaForm.custom_size_max = Number(record.custom_size_max || 3840);
+  sceneMetaForm.custom_size_step = Number(record.custom_size_step || 8);
   sceneMetaForm.max_reference_images = Number(record.max_reference_images || 0);
   sceneMetaForm.aspect_ratio_options_json = record.aspect_ratio_options_json || DEFAULT_ASPECT_RATIO_OPTIONS_JSON;
   sceneMetaForm.image_size_options_json = record.image_size_options_json || DEFAULT_IMAGE_SIZE_OPTIONS_JSON;
@@ -524,6 +536,9 @@ function openCopyScene(record: ExternalApiSceneBinding) {
   sceneForm.hide_aspect_ratio = !!record.hide_aspect_ratio;
   sceneForm.hide_resolution = !!record.hide_resolution;
   sceneForm.hide_custom_size = !!record.hide_custom_size;
+  sceneForm.custom_size_min = Number(record.custom_size_min || 256);
+  sceneForm.custom_size_max = Number(record.custom_size_max || 3840);
+  sceneForm.custom_size_step = Number(record.custom_size_step || 8);
   sceneForm.api_config_id = record.api_config_id ?? null;
   sceneForm.backup_api_config_id = record.backup_api_config_id ?? null;
   sceneForm.display_name = record.display_name || "";
@@ -592,6 +607,9 @@ function buildSceneTemplateData(record: ExternalApiSceneBinding): ExternalApiSce
     hide_aspect_ratio: !!record.hide_aspect_ratio,
     hide_resolution: !!record.hide_resolution,
     hide_custom_size: !!record.hide_custom_size,
+    custom_size_min: Number(record.custom_size_min || 256),
+    custom_size_max: Number(record.custom_size_max || 3840),
+    custom_size_step: Number(record.custom_size_step || 8),
     api_config_id: record.api_config_id ?? null,
     backup_api_config_id: record.backup_api_config_id ?? null,
     display_name: record.display_name || "",
@@ -665,6 +683,9 @@ function applyImportedSceneData(data: Record<string, unknown>) {
   sceneForm.hide_aspect_ratio = normalizeBooleanValue(data.hide_aspect_ratio, sceneForm.hide_aspect_ratio);
   sceneForm.hide_resolution = normalizeBooleanValue(data.hide_resolution, sceneForm.hide_resolution);
   sceneForm.hide_custom_size = normalizeBooleanValue(data.hide_custom_size, sceneForm.hide_custom_size);
+  sceneForm.custom_size_min = normalizeNumberValue(data.custom_size_min, sceneForm.custom_size_min);
+  sceneForm.custom_size_max = normalizeNumberValue(data.custom_size_max, sceneForm.custom_size_max);
+  sceneForm.custom_size_step = normalizeNumberValue(data.custom_size_step, sceneForm.custom_size_step);
   sceneForm.api_config_id = normalizeNullableNumberValue(data.api_config_id);
   sceneForm.backup_api_config_id = normalizeNullableNumberValue(data.backup_api_config_id);
   sceneForm.display_name = normalizeStringValue(data.display_name, sceneForm.display_name);
@@ -885,6 +906,29 @@ function buildBindingPayload(record: ExternalApiSceneBinding, overrides: Partial
   };
 }
 
+function validateCustomSizeLimits(form: { custom_size_min: number; custom_size_max: number; custom_size_step: number }) {
+  const minimum = Number(form.custom_size_min);
+  const maximum = Number(form.custom_size_max);
+  const step = Number(form.custom_size_step);
+  if (!Number.isInteger(minimum) || minimum <= 0 || !Number.isInteger(maximum) || maximum < minimum) {
+    message.warning("自定义分辨率范围配置不正确");
+    return false;
+  }
+  if (!Number.isInteger(step) || step <= 0) {
+    message.warning("自定义分辨率步长必须是正整数");
+    return false;
+  }
+  return true;
+}
+
+function setSceneSupportsCustomSize(checked: boolean) {
+  sceneForm.hide_custom_size = !checked;
+}
+
+function setSceneMetaSupportsCustomSize(checked: boolean) {
+  sceneMetaForm.hide_custom_size = !checked;
+}
+
 async function handleCreateScene() {
   if (!sceneForm.scene_key.trim()) {
     message.warning("请输入场景标识");
@@ -894,6 +938,7 @@ async function handleCreateScene() {
     message.warning("请输入场景名称");
     return;
   }
+  if (!validateCustomSizeLimits(sceneForm)) return;
   if (!validateSceneOptionsJson(sceneForm.aspect_ratio_options_json, "宽高比选项 JSON")) return;
   if (!validateSceneOptionsJson(sceneForm.image_size_options_json, "生图质量选项 JSON")) return;
   if (!validateSceneOptionsJson(sceneForm.custom_size_options_json, "自定义分辨率选项 JSON")) return;
@@ -911,6 +956,9 @@ async function handleCreateScene() {
       hide_aspect_ratio: !!sceneForm.hide_aspect_ratio,
       hide_resolution: !!sceneForm.hide_resolution,
       hide_custom_size: !!sceneForm.hide_custom_size,
+      custom_size_min: Number(sceneForm.custom_size_min),
+      custom_size_max: Number(sceneForm.custom_size_max),
+      custom_size_step: Number(sceneForm.custom_size_step),
       api_config_id: sceneForm.api_config_id ?? null,
       backup_api_config_id: sceneForm.backup_api_config_id ?? null,
       display_name: sceneForm.display_name.trim(),
@@ -944,6 +992,7 @@ async function handleSaveSceneMeta() {
     message.warning("请输入场景名称");
     return;
   }
+  if (!validateCustomSizeLimits(sceneMetaForm)) return;
   if (!validateSceneOptionsJson(sceneMetaForm.aspect_ratio_options_json, "宽高比选项 JSON")) return;
   if (!validateSceneOptionsJson(sceneMetaForm.image_size_options_json, "生图质量选项 JSON")) return;
   if (!validateSceneOptionsJson(sceneMetaForm.custom_size_options_json, "自定义分辨率选项 JSON")) return;
@@ -960,6 +1009,9 @@ async function handleSaveSceneMeta() {
       hide_aspect_ratio: !!sceneMetaForm.hide_aspect_ratio,
       hide_resolution: !!sceneMetaForm.hide_resolution,
       hide_custom_size: !!sceneMetaForm.hide_custom_size,
+      custom_size_min: Number(sceneMetaForm.custom_size_min),
+      custom_size_max: Number(sceneMetaForm.custom_size_max),
+      custom_size_step: Number(sceneMetaForm.custom_size_step),
       max_reference_images: Number(sceneMetaForm.max_reference_images || 0),
       aspect_ratio_options_json: sceneMetaForm.aspect_ratio_options_json,
       image_size_options_json: sceneMetaForm.image_size_options_json,
@@ -1647,8 +1699,28 @@ function copySecret(value: string, label: string) {
             </a-form-item>
           </a-col>
           <a-col :span="8">
-            <a-form-item label="隐藏自定义分辨率">
-              <a-switch v-model:checked="sceneForm.hide_custom_size" />
+            <a-form-item label="支持自定义分辨率">
+              <a-switch
+                :checked="!sceneForm.hide_custom_size"
+                @change="setSceneSupportsCustomSize"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row v-if="!sceneForm.hide_custom_size" :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="最小宽高">
+              <a-input-number v-model:value="sceneForm.custom_size_min" :min="1" :precision="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="最大宽高">
+              <a-input-number v-model:value="sceneForm.custom_size_max" :min="sceneForm.custom_size_min" :precision="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="递增步长">
+              <a-input-number v-model:value="sceneForm.custom_size_step" :min="1" :precision="0" style="width: 100%" />
             </a-form-item>
           </a-col>
         </a-row>
@@ -1677,7 +1749,7 @@ function copySecret(value: string, label: string) {
           </div>
         </a-form-item>
 
-        <a-form-item label="自定义分辨率选项 JSON">
+        <a-form-item label="旧版自定义分辨率选项 JSON（兼容）">
           <a-textarea
             v-model:value="sceneForm.custom_size_options_json"
             class="warm-textarea"
@@ -1685,7 +1757,7 @@ function copySecret(value: string, label: string) {
             placeholder='[{"label":"1024 x 1024","value":"1024x1024"}]'
           />
           <div class="scene-desc" style="margin-top: 6px">
-            使用 `label/value` 数组；`value` 会映射到请求里的 <code v-pre>{{ custom_size }}</code> 占位符。
+            仅用于兼容旧入口；主生图页开启自定义分辨率后改为手动输入宽高。
           </div>
         </a-form-item>
 
@@ -1700,6 +1772,10 @@ function copySecret(value: string, label: string) {
             使用 `宽高比 -> 生图质量 -> 第三方分辨率` 对象；匹配结果会映射到请求里的
             <code v-pre>{{ mapped_resolution }}</code>
             占位符。
+          </div>
+          <div class="scene-desc" style="margin-top: 6px">
+            未开启自定义分辨率时继续使用 <code v-pre>{{ mapped_resolution }}</code> 即可，原有接口不用改。
+            只有开启自定义后，才需要改成 <code v-pre>{{ resolved_resolution }}</code>（有手动宽高用手动宽高，否则回退映射分辨率）。
           </div>
         </a-form-item>
 
@@ -1786,8 +1862,28 @@ function copySecret(value: string, label: string) {
             </a-form-item>
           </a-col>
           <a-col :span="8">
-            <a-form-item label="隐藏自定义分辨率">
-              <a-switch v-model:checked="sceneMetaForm.hide_custom_size" />
+            <a-form-item label="支持自定义分辨率">
+              <a-switch
+                :checked="!sceneMetaForm.hide_custom_size"
+                @change="setSceneMetaSupportsCustomSize"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row v-if="!sceneMetaForm.hide_custom_size" :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="最小宽高">
+              <a-input-number v-model:value="sceneMetaForm.custom_size_min" :min="1" :precision="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="最大宽高">
+              <a-input-number v-model:value="sceneMetaForm.custom_size_max" :min="sceneMetaForm.custom_size_min" :precision="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="递增步长">
+              <a-input-number v-model:value="sceneMetaForm.custom_size_step" :min="1" :precision="0" style="width: 100%" />
             </a-form-item>
           </a-col>
         </a-row>
@@ -1816,7 +1912,7 @@ function copySecret(value: string, label: string) {
           </div>
         </a-form-item>
 
-        <a-form-item label="自定义分辨率选项 JSON">
+        <a-form-item label="旧版自定义分辨率选项 JSON（兼容）">
           <a-textarea
             v-model:value="sceneMetaForm.custom_size_options_json"
             class="warm-textarea"
@@ -1824,7 +1920,7 @@ function copySecret(value: string, label: string) {
             placeholder='[{"label":"1024 x 1024","value":"1024x1024"}]'
           />
           <div class="scene-desc" style="margin-top: 6px">
-            使用 `label/value` 数组；`value` 会映射到请求里的 <code v-pre>{{ custom_size }}</code> 占位符。
+            仅用于兼容旧入口；主生图页开启自定义分辨率后改为手动输入宽高。
           </div>
         </a-form-item>
 
@@ -1839,6 +1935,10 @@ function copySecret(value: string, label: string) {
             使用 `宽高比 -> 生图质量 -> 第三方分辨率` 对象；匹配结果会映射到请求里的
             <code v-pre>{{ mapped_resolution }}</code>
             占位符。
+          </div>
+          <div class="scene-desc" style="margin-top: 6px">
+            未开启自定义分辨率时继续使用 <code v-pre>{{ mapped_resolution }}</code> 即可，原有接口不用改。
+            只有开启自定义后，才需要改成 <code v-pre>{{ resolved_resolution }}</code>（有手动宽高用手动宽高，否则回退映射分辨率）。
           </div>
         </a-form-item>
 

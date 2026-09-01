@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent, h, inject, onActivated, onBeforeUnmount, onMounted, watch, type Ref } from "vue";
+import { ref, computed, defineAsyncComponent, h, inject, nextTick, onActivated, onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 import { message, Modal, notification } from "ant-design-vue";
 import dayjs from "dayjs";
 import { useRouter } from "vue-router";
@@ -100,6 +100,13 @@ function showInsufficientCreditsPurchase(detail?: string) {
 type GenerateMode = "textGenerate" | "imageEdit" | "inpaint" | "promptReverse";
 const MAX_RECENT_GENERATED_TASKS = 20;
 const MAX_ACTIVE_GENERATION_IMAGES = 12;
+const GENERATION_IMAGE_COUNT_OPTIONS: SceneOptionItem[] = Array.from(
+  { length: MAX_ACTIVE_GENERATION_IMAGES },
+  (_, index) => {
+    const value = String(index + 1);
+    return { label: value, value };
+  },
+);
 const DEFAULT_SCENE_COSTS: Record<string, number> = {
   banana: 4,
   banana2: 4,
@@ -148,6 +155,9 @@ const numImages = ref(1);
 const resolution = ref("2K");
 const size = ref("9:16");
 const customSize = ref("");
+const customSizeEnabled = ref(false);
+const customWidth = ref(1024);
+const customHeight = ref(1024);
 const aspectRatioAutoDetectEnabled = ref(readStoredAspectRatioAutoDetectEnabled());
 const selectedColorStyleId = ref("");
 const selectedLightingStyleId = ref("");
@@ -155,6 +165,15 @@ const selectedCameraBodyId = ref("");
 const selectedCameraLensId = ref("");
 const selectedCameraFocalId = ref("");
 const selectedCameraApertureId = ref("");
+const selectedNumImages = computed({
+  get: () => String(numImages.value),
+  set: (value: string) => {
+    numImages.value = Math.min(
+      MAX_ACTIVE_GENERATION_IMAGES,
+      Math.max(1, Number(value) || 1),
+    );
+  },
+});
 
 type GeneratedTaskStatus = TaskResult["status"] | "submitting";
 type SubmitMode = Exclude<GenerateMode, "promptReverse">;
@@ -314,6 +333,9 @@ function toGenerationModelOption(scene: TaskSceneConfig): GenerationModelOption 
     hide_aspect_ratio: scene.hide_aspect_ratio,
     hide_resolution: scene.hide_resolution,
     hide_custom_size: scene.hide_custom_size,
+    custom_size_min: scene.custom_size_min,
+    custom_size_max: scene.custom_size_max,
+    custom_size_step: scene.custom_size_step,
     credit_cost: scene.credit_cost,
     resolution_credit_costs: scene.resolution_credit_costs || {},
     max_reference_images: scene.max_reference_images,
@@ -425,8 +447,278 @@ const hideResolution = computed(() => (
   (isTextGenerateMode.value || isImageEditMode.value) && !!selectedModelOption.value?.hide_resolution
 ));
 const hideCustomSize = computed(() => (
-  (isTextGenerateMode.value || isImageEditMode.value) && !!selectedModelOption.value?.hide_custom_size
+  (isTextGenerateMode.value || isImageEditMode.value)
+  && selectedModelOption.value?.hide_custom_size !== false
 ));
+const supportsCustomSize = computed(() => (
+  (isTextGenerateMode.value || isImageEditMode.value)
+  && selectedModelOption.value?.hide_custom_size === false
+));
+const CUSTOM_SIZE_PIXEL_MULTIPLE = 16;
+const CUSTOM_SIZE_MAX_ASPECT_RATIO = 3;
+const CUSTOM_SIZE_MAX_SIDE = 3840;
+const customSizeMin = computed(() => Math.max(1, Number(selectedModelOption.value?.custom_size_min || 256)));
+const customSizeMax = computed(() => Math.max(customSizeMin.value, Number(selectedModelOption.value?.custom_size_max || 3840)));
+const customSizeLimit = computed(() => Math.min(customSizeMax.value, CUSTOM_SIZE_MAX_SIDE));
+const customSizeStep = computed(() => Math.max(1, Number(selectedModelOption.value?.custom_size_step || 8)));
+
+function snapToCustomSizeMultiple(value: number) {
+  return Math.round(value / CUSTOM_SIZE_PIXEL_MULTIPLE) * CUSTOM_SIZE_PIXEL_MULTIPLE;
+}
+
+function stepCustomDimension(current: number, direction: 1 | -1) {
+  const multiple = CUSTOM_SIZE_PIXEL_MULTIPLE;
+  const next = direction > 0
+    ? Math.ceil((current + multiple) / multiple) * multiple
+    : Math.floor((current - 1) / multiple) * multiple;
+  return Math.min(customSizeLimit.value, Math.max(customSizeMin.value, next));
+}
+
+function parseCustomSizeInput(value: string) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function formatCustomSizeInput(value: string | number) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function bindDigitsOnlyInput(input: HTMLInputElement) {
+  const sanitize = () => {
+    const digits = input.value.replace(/\D/g, "");
+    if (input.value !== digits) {
+      input.value = digits;
+    }
+  };
+
+  const abortIme = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    input.setAttribute("readonly", "readonly");
+    sanitize();
+    requestAnimationFrame(() => {
+      input.removeAttribute("readonly");
+      sanitize();
+    });
+  };
+
+  const onKeydown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.key === "Process" || event.key === "Unidentified") {
+      event.preventDefault();
+      abortIme(event);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (["Backspace", "Delete", "Tab", "Enter", "Escape", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    if (/^\d$/.test(event.key)) return;
+    event.preventDefault();
+  };
+
+  const onBeforeInput = (event: InputEvent) => {
+    if (event.isComposing || event.inputType === "insertCompositionText") {
+      event.preventDefault();
+      abortIme(event);
+      return;
+    }
+    if (event.data && !/^\d+$/.test(event.data)) {
+      event.preventDefault();
+    }
+  };
+
+  const onPaste = (event: ClipboardEvent) => {
+    event.preventDefault();
+    const digits = (event.clipboardData?.getData("text") ?? "").replace(/\D/g, "");
+    if (!digits) return;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = `${input.value.slice(0, start)}${digits}${input.value.slice(end)}`.replace(/\D/g, "");
+    const caret = Math.min(input.value.length, start + digits.length);
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  input.setAttribute("inputmode", "numeric");
+  input.setAttribute("pattern", "[0-9]*");
+  input.setAttribute("lang", "en");
+  input.setAttribute("autocomplete", "off");
+  input.addEventListener("keydown", onKeydown, true);
+  input.addEventListener("beforeinput", onBeforeInput as EventListener, true);
+  input.addEventListener("compositionstart", abortIme, true);
+  input.addEventListener("compositionupdate", abortIme, true);
+  input.addEventListener("compositionend", abortIme, true);
+  input.addEventListener("input", sanitize, true);
+  input.addEventListener("paste", onPaste, true);
+
+  return () => {
+    input.removeEventListener("keydown", onKeydown, true);
+    input.removeEventListener("beforeinput", onBeforeInput as EventListener, true);
+    input.removeEventListener("compositionstart", abortIme, true);
+    input.removeEventListener("compositionupdate", abortIme, true);
+    input.removeEventListener("compositionend", abortIme, true);
+    input.removeEventListener("input", sanitize, true);
+    input.removeEventListener("paste", onPaste, true);
+  };
+}
+
+const digitsOnlyCleanups = new WeakMap<HTMLElement, () => void>();
+const digitsOnlyBoundInputs = new WeakMap<HTMLElement, HTMLInputElement>();
+
+const vDigitsOnly = {
+  mounted(el: HTMLElement) {
+    const input = el.tagName === "INPUT" ? el as HTMLInputElement : el.querySelector("input");
+    if (!input) return;
+    digitsOnlyCleanups.set(el, bindDigitsOnlyInput(input));
+    digitsOnlyBoundInputs.set(el, input);
+  },
+  updated(el: HTMLElement) {
+    const input = el.tagName === "INPUT" ? el as HTMLInputElement : el.querySelector("input");
+    if (!input || digitsOnlyBoundInputs.get(el) === input) return;
+    digitsOnlyCleanups.get(el)?.();
+    digitsOnlyCleanups.set(el, bindDigitsOnlyInput(input));
+    digitsOnlyBoundInputs.set(el, input);
+  },
+  unmounted(el: HTMLElement) {
+    digitsOnlyCleanups.get(el)?.();
+    digitsOnlyCleanups.delete(el);
+    digitsOnlyBoundInputs.delete(el);
+  },
+};
+
+function applyCustomDimensionChange(current: number, incoming: number | string | null) {
+  const next = Number(incoming);
+  if (!Number.isFinite(next)) return current;
+  if (Number.isFinite(current) && next === current + CUSTOM_SIZE_PIXEL_MULTIPLE) {
+    return stepCustomDimension(current, 1);
+  }
+  if (Number.isFinite(current) && next === current - CUSTOM_SIZE_PIXEL_MULTIPLE) {
+    return stepCustomDimension(current, -1);
+  }
+  return next;
+}
+
+function handleCustomWidthChange(value: number | string | null) {
+  customWidth.value = applyCustomDimensionChange(Number(customWidth.value), value);
+}
+
+function handleCustomHeightChange(value: number | string | null) {
+  customHeight.value = applyCustomDimensionChange(Number(customHeight.value), value);
+}
+
+function normalizeCustomDimension(value: number) {
+  const snapped = snapToCustomSizeMultiple(Number(value) || customSizeMin.value);
+  return Math.min(customSizeLimit.value, Math.max(customSizeMin.value, snapped));
+}
+
+function resetCustomSizeInput() {
+  customSizeEnabled.value = false;
+  customWidth.value = normalizeCustomDimension(1024);
+  customHeight.value = normalizeCustomDimension(1024);
+  customSize.value = "";
+}
+
+function parseCustomSizeValue(value?: string | null) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return null;
+  const match = normalized.match(/^(\d+)\s*[xX×*]\s*(\d+)$/);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
+
+function applyCustomSizeFromValue(value?: string | null) {
+  const parsed = parseCustomSizeValue(value);
+  if (!parsed) {
+    resetCustomSizeInput();
+    return;
+  }
+  customSizeEnabled.value = true;
+  customWidth.value = parsed.width;
+  customHeight.value = parsed.height;
+  customSize.value = `${parsed.width}x${parsed.height}`;
+}
+
+function refillCustomSizeFromValue(value?: string | null) {
+  applyCustomSizeFromValue(value);
+  void nextTick(() => applyCustomSizeFromValue(value));
+}
+
+function syncCustomSizeToCurrentLimits() {
+  if (!supportsCustomSize.value) {
+    if (customSizeEnabled.value || customSize.value) {
+      resetCustomSizeInput();
+    } else {
+      customWidth.value = normalizeCustomDimension(Number(customWidth.value) || 1024);
+      customHeight.value = normalizeCustomDimension(Number(customHeight.value) || 1024);
+    }
+    return;
+  }
+  if (!customSizeEnabled.value) {
+    customWidth.value = normalizeCustomDimension(Number(customWidth.value) || 1024);
+    customHeight.value = normalizeCustomDimension(Number(customHeight.value) || 1024);
+    return;
+  }
+  customWidth.value = normalizeCustomDimension(Number(customWidth.value));
+  customHeight.value = normalizeCustomDimension(Number(customHeight.value));
+  customSize.value = `${Number(customWidth.value)}x${Number(customHeight.value)}`;
+}
+
+function onCustomSizeToggle(checked: boolean) {
+  customSizeEnabled.value = checked;
+  if (!checked) {
+    customSize.value = "";
+    return;
+  }
+  customSize.value = `${Number(customWidth.value)}x${Number(customHeight.value)}`;
+}
+
+function getCustomDimensionError(value: number, otherValue: number) {
+  if (!Number.isInteger(value)) {
+    return "必须是16倍数";
+  }
+  if (value % CUSTOM_SIZE_PIXEL_MULTIPLE !== 0) {
+    return "必须是16倍数";
+  }
+  if (value > CUSTOM_SIZE_MAX_SIDE) {
+    return `最大边长不超过 ${CUSTOM_SIZE_MAX_SIDE}px`;
+  }
+  if (value < customSizeMin.value || value > customSizeMax.value) {
+    return `须为 ${customSizeMin.value}-${customSizeMax.value} 的整数`;
+  }
+  if (
+    Number.isInteger(otherValue)
+    && otherValue > 0
+    && value > otherValue * CUSTOM_SIZE_MAX_ASPECT_RATIO
+  ) {
+    return `长短边比例不能超过 ${CUSTOM_SIZE_MAX_ASPECT_RATIO}:1`;
+  }
+  return "";
+}
+
+const customWidthError = computed(() => (
+  customSizeEnabled.value ? getCustomDimensionError(Number(customWidth.value), Number(customHeight.value)) : ""
+));
+const customHeightError = computed(() => (
+  customSizeEnabled.value ? getCustomDimensionError(Number(customHeight.value), Number(customWidth.value)) : ""
+));
+
+function validateCustomSizeInput() {
+  if (!customSizeEnabled.value) return true;
+  if (customWidthError.value || customHeightError.value) {
+    const tips = [
+      customWidthError.value ? `宽度${customWidthError.value}` : "",
+      customHeightError.value ? `高度${customHeightError.value}` : "",
+    ].filter(Boolean);
+    message.warning(tips.join("；"));
+    return false;
+  }
+  customSize.value = `${Number(customWidth.value)}x${Number(customHeight.value)}`;
+  return true;
+}
 const sceneCostMap = computed(() => Object.fromEntries(taskScenes.value.map((item) => [item.scene_key, item.credit_cost])));
 function resolveSceneCreditCost(sceneKey: string, targetResolution = resolution.value) {
   const scene = generationModels.value.find((item) => item.model_key === sceneKey)
@@ -441,7 +733,10 @@ function resolveSceneCreditCost(sceneKey: string, targetResolution = resolution.
     ?? DEFAULT_SCENE_COSTS[sceneKey]
     ?? 0;
 }
-const selectedModelCreditCost = computed(() => resolveSceneCreditCost(selectedModel.value, resolution.value));
+const selectedModelCreditCost = computed(() => resolveSceneCreditCost(
+  selectedModel.value,
+  customSizeEnabled.value ? "" : resolution.value,
+));
 const promptReverseCreditCost = computed(() => sceneCostMap.value.prompt_reverse ?? DEFAULT_SCENE_COSTS.prompt_reverse);
 const promptOptimizeCreditCost = computed(() => sceneCostMap.value.prompt_optimize ?? DEFAULT_SCENE_COSTS.prompt_optimize);
 const inpaintCreditCost = computed(() => sceneCostMap.value.inpaint ?? DEFAULT_SCENE_COSTS.inpaint);
@@ -1745,6 +2040,7 @@ async function handleGenerate() {
     message.warning("请输入提示词");
     return;
   }
+  if (supportsCustomSize.value && !validateCustomSizeInput()) return;
   const availableSlots = remainingGenerationImageSlots.value;
   if (availableSlots <= 0) {
     message.warning(`当前最多允许同时生成 ${MAX_ACTIVE_GENERATION_IMAGES} 张图片，请等待部分任务完成后再试`);
@@ -1791,7 +2087,7 @@ async function handleGenerate() {
       num_images: 1,
       size: size.value,
       resolution: resolution.value,
-      custom_size: customSize.value,
+      custom_size: "",
       source_image: sourceImageUrl.value,
       mask_image: maskUploadUrl,
     };
@@ -1802,9 +2098,9 @@ async function handleGenerate() {
       model: selectedModel.value,
       prompt: submitPrompt,
       num_images: requestedImageCount,
-      size: hideAspectRatio.value ? "" : size.value,
-      resolution: hideResolution.value ? "" : resolution.value,
-      custom_size: hideCustomSize.value ? "" : customSize.value,
+      size: customSizeEnabled.value || hideAspectRatio.value ? "" : size.value,
+      resolution: customSizeEnabled.value || hideResolution.value ? "" : resolution.value,
+      custom_size: customSizeEnabled.value ? customSize.value : "",
       reference_images: isImageEditMode.value && referenceUrls.value.length ? referenceUrls.value : undefined,
     };
     if (requestedImageCount < numImages.value) {
@@ -1844,7 +2140,6 @@ function handleReeditTask(task: GeneratedTaskItem) {
   generateMode.value = task.mode;
   size.value = task.size || "9:16";
   resolution.value = task.resolution || "2K";
-  customSize.value = task.customSize || "";
 
   if (task.mode === "inpaint") {
     applyPromptWithGenerateStyles(task.prompt, "repaintPrompt");
@@ -1873,6 +2168,7 @@ function handleReeditTask(task: GeneratedTaskItem) {
     canRedoMask.value = false;
     repaintCanvasRef.value?.clearMask();
   }
+  refillCustomSizeFromValue(task.customSize);
   message.success("已回填到编辑区");
 }
 
@@ -1887,7 +2183,7 @@ function handleEditImageTask(task: GeneratedTaskItem, image: ImageResult) {
   repaintPrompt.value = "";
   size.value = task.size || "9:16";
   resolution.value = task.resolution || "2K";
-  customSize.value = task.customSize || "";
+  refillCustomSizeFromValue(task.customSize);
   numImages.value = Math.min(MAX_ACTIVE_GENERATION_IMAGES, Math.max(1, Number(task.numImages || 1)));
   syncReferenceItems([referenceImage]);
   revokeObjectUrl(sourcePreviewUrl.value);
@@ -2023,7 +2319,7 @@ function handleInpaintGeneratedImage(task: GeneratedTaskItem, img: ImageResult) 
   prompt.value = "";
   size.value = task.size || sizeOptions.value[0]?.value || "1:1";
   resolution.value = task.resolution || "2K";
-  customSize.value = task.customSize || "";
+  refillCustomSizeFromValue(task.customSize);
   numImages.value = 1;
   syncReferenceItems([]);
   revokeObjectUrl(sourcePreviewUrl.value);
@@ -2152,7 +2448,6 @@ function applyDraft(raw: string | null, successText: string, storageKey: string)
     generateMode.value = draftMode;
     size.value = draft.size || "9:16";
     resolution.value = draft.resolution || "2K";
-    customSize.value = draft.custom_size || "";
 
     if (draftMode === "inpaint") {
       applyPromptWithGenerateStyles(draft.prompt || "", "repaintPrompt");
@@ -2199,6 +2494,7 @@ function applyDraft(raw: string | null, successText: string, storageKey: string)
       canRedoMask.value = false;
       repaintCanvasRef.value?.clearMask();
     }
+    refillCustomSizeFromValue(draft.custom_size);
     localStorage.removeItem(storageKey);
     message.success(successText);
   } catch {
@@ -2307,12 +2603,11 @@ watch([resolutionOptions, hideResolution], ([options, shouldHide]) => {
   }
 }, { immediate: true });
 
-watch([customSizeOptions, hideCustomSize], ([options, shouldHide]) => {
-  if (shouldHide || !options.length) return;
-  if (!options.some((item) => item.value === customSize.value)) {
-    customSize.value = options[0].value;
-  }
-}, { immediate: true });
+watch(
+  [() => selectedModel.value, () => generateMode.value, customSizeMin, customSizeMax, customSizeStep, supportsCustomSize],
+  syncCustomSizeToCurrentLimits,
+  { immediate: true },
+);
 
 watch(() => auth.isLoggedIn, (isLoggedIn) => {
   if (isLoggedIn) {
@@ -2590,11 +2885,30 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-row settings-row-inline config-section compact-config-section">
-                <div v-if="!hideAspectRatio" class="setting-item setting-item-inline">
+                <div v-if="!hideAspectRatio && !customSizeEnabled" class="setting-item setting-item-inline">
                   <label>宽高比</label>
                   <AspectRatioPicker v-model="size" :options="sizeOptions" />
                 </div>
-                <div v-if="!hideResolution" class="setting-item setting-item-inline">
+                <div v-else-if="customSizeEnabled" class="setting-item setting-item-inline">
+                  <label>宽度</label>
+                  <div class="custom-size-input-wrap">
+                    <a-input-number
+                      v-digits-only
+                      :value="customWidth"
+                      class="warm-input-number custom-size-input"
+                      :class="{ 'is-invalid': !!customWidthError }"
+                      :step="CUSTOM_SIZE_PIXEL_MULTIPLE"
+                      :precision="0"
+                      :parser="parseCustomSizeInput"
+                      :formatter="formatCustomSizeInput"
+                      :status="customWidthError ? 'error' : undefined"
+                      @update:value="handleCustomWidthChange"
+                    />
+                    <span class="custom-size-unit">px</span>
+                  </div>
+                  <div v-if="customWidthError" class="custom-size-error">{{ customWidthError }}</div>
+                </div>
+                <div v-if="!hideResolution && !customSizeEnabled" class="setting-item setting-item-inline">
                   <label>分辨率</label>
                   <OptionGridPicker
                     v-model="resolution"
@@ -2603,19 +2917,41 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     placeholder="选择分辨率"
                   />
                 </div>
-                <div v-if="!hideCustomSize" class="setting-item setting-item-inline">
-                  <label>分辨率</label>
+                <div v-else-if="customSizeEnabled" class="setting-item setting-item-inline custom-size-height-col">
+                  <span class="custom-size-x" aria-hidden="true">×</span>
+                  <label>高度</label>
+                  <div class="custom-size-input-wrap">
+                    <a-input-number
+                      v-digits-only
+                      :value="customHeight"
+                      class="warm-input-number custom-size-input"
+                      :class="{ 'is-invalid': !!customHeightError }"
+                      :step="CUSTOM_SIZE_PIXEL_MULTIPLE"
+                      :precision="0"
+                      :parser="parseCustomSizeInput"
+                      :formatter="formatCustomSizeInput"
+                      :status="customHeightError ? 'error' : undefined"
+                      @update:value="handleCustomHeightChange"
+                    />
+                    <span class="custom-size-unit">px</span>
+                  </div>
+                  <div v-if="customHeightError" class="custom-size-error">{{ customHeightError }}</div>
+                </div>
+                <div class="setting-item setting-item-inline">
+                  <label>图片数量</label>
                   <OptionGridPicker
-                    v-model="customSize"
-                    :options="customSizeOptions"
-                    panel-title="选择分辨率"
-                    placeholder="选择分辨率"
-                    show-preview
+                    v-model="selectedNumImages"
+                    :options="GENERATION_IMAGE_COUNT_OPTIONS"
+                    panel-title="选择图片数量"
+                    placeholder="选择图片数量"
                   />
                 </div>
               </div>
-              <div v-if="!hideAspectRatio" class="settings-row config-section">
-                <div class="aspect-ratio-auto-row">
+              <div
+                v-if="!hideAspectRatio || supportsCustomSize"
+                class="settings-row config-section custom-size-bottom-row"
+              >
+                <div v-if="!hideAspectRatio" class="aspect-ratio-auto-row">
                   <a-switch v-model:checked="aspectRatioAutoDetectEnabled" size="small" class="aspect-ratio-auto-switch" />
                   <div class="aspect-ratio-auto-text">
                     <span class="aspect-ratio-auto-label">比例自动识别</span>
@@ -2626,18 +2962,30 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     </a-tooltip>
                   </div>
                 </div>
-              </div>
-
-              <div class="generate-actions-block config-section action-config-section">
-                <div class="field-block">
-                  <label>图片数量：{{ numImages }}</label>
-                  <a-slider
-                    v-model:value="numImages"
-                    :min="1"
-                    :max="MAX_ACTIVE_GENERATION_IMAGES"
-                    :marks="{ 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10', 11: '11', 12: '12' }"
-                    class="num-slider"
-                  />
+                <div v-if="supportsCustomSize" class="aspect-ratio-auto-row custom-size-toggle-row">
+                  <a-switch v-model:checked="customSizeEnabled" size="small" class="aspect-ratio-auto-switch" @change="onCustomSizeToggle" />
+                  <div class="aspect-ratio-auto-text">
+                    <span class="aspect-ratio-auto-label">自定义分辨率</span>
+                    <a-tooltip
+                      overlay-class-name="custom-size-help-tooltip"
+                      placement="top"
+                      :get-popup-container="getBodyPopupContainer"
+                    >
+                      <template #title>
+                        <div class="custom-size-help-tip">
+                          <div>开启后可手动输入宽高：</div>
+                          <ul>
+                            <li>宽高须为 16 的倍数</li>
+                            <li>长短边比例不超过 3:1</li>
+                            <li>最大边长不超过 3840px</li>
+                          </ul>
+                        </div>
+                      </template>
+                      <button type="button" class="aspect-ratio-auto-help" aria-label="自定义分辨率说明">
+                        <QuestionCircleOutlined />
+                      </button>
+                    </a-tooltip>
+                  </div>
                 </div>
               </div>
               </template>
@@ -2936,11 +3284,30 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
               </div>
 
               <div class="settings-row settings-row-inline config-section compact-config-section">
-                <div v-if="!hideAspectRatio" class="setting-item setting-item-inline">
+                <div v-if="!hideAspectRatio && !customSizeEnabled" class="setting-item setting-item-inline">
                   <label>宽高比</label>
                   <AspectRatioPicker v-model="size" :options="sizeOptions" />
                 </div>
-                <div v-if="!hideResolution" class="setting-item setting-item-inline">
+                <div v-else-if="customSizeEnabled" class="setting-item setting-item-inline">
+                  <label>宽度</label>
+                  <div class="custom-size-input-wrap">
+                    <a-input-number
+                      v-digits-only
+                      :value="customWidth"
+                      class="warm-input-number custom-size-input"
+                      :class="{ 'is-invalid': !!customWidthError }"
+                      :step="CUSTOM_SIZE_PIXEL_MULTIPLE"
+                      :precision="0"
+                      :parser="parseCustomSizeInput"
+                      :formatter="formatCustomSizeInput"
+                      :status="customWidthError ? 'error' : undefined"
+                      @update:value="handleCustomWidthChange"
+                    />
+                    <span class="custom-size-unit">px</span>
+                  </div>
+                  <div v-if="customWidthError" class="custom-size-error">{{ customWidthError }}</div>
+                </div>
+                <div v-if="!hideResolution && !customSizeEnabled" class="setting-item setting-item-inline">
                   <label>分辨率</label>
                   <OptionGridPicker
                     v-model="resolution"
@@ -2949,19 +3316,41 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     placeholder="选择分辨率"
                   />
                 </div>
-                <div v-if="!hideCustomSize" class="setting-item setting-item-inline">
-                  <label>分辨率</label>
+                <div v-else-if="customSizeEnabled" class="setting-item setting-item-inline custom-size-height-col">
+                  <span class="custom-size-x" aria-hidden="true">×</span>
+                  <label>高度</label>
+                  <div class="custom-size-input-wrap">
+                    <a-input-number
+                      v-digits-only
+                      :value="customHeight"
+                      class="warm-input-number custom-size-input"
+                      :class="{ 'is-invalid': !!customHeightError }"
+                      :step="CUSTOM_SIZE_PIXEL_MULTIPLE"
+                      :precision="0"
+                      :parser="parseCustomSizeInput"
+                      :formatter="formatCustomSizeInput"
+                      :status="customHeightError ? 'error' : undefined"
+                      @update:value="handleCustomHeightChange"
+                    />
+                    <span class="custom-size-unit">px</span>
+                  </div>
+                  <div v-if="customHeightError" class="custom-size-error">{{ customHeightError }}</div>
+                </div>
+                <div class="setting-item setting-item-inline">
+                  <label>图片数量</label>
                   <OptionGridPicker
-                    v-model="customSize"
-                    :options="customSizeOptions"
-                    panel-title="选择分辨率"
-                    placeholder="选择分辨率"
-                    show-preview
+                    v-model="selectedNumImages"
+                    :options="GENERATION_IMAGE_COUNT_OPTIONS"
+                    panel-title="选择图片数量"
+                    placeholder="选择图片数量"
                   />
                 </div>
               </div>
-              <div v-if="!hideAspectRatio" class="settings-row config-section">
-                <div class="aspect-ratio-auto-row">
+              <div
+                v-if="!hideAspectRatio || supportsCustomSize"
+                class="settings-row config-section custom-size-bottom-row"
+              >
+                <div v-if="!hideAspectRatio" class="aspect-ratio-auto-row">
                   <a-switch v-model:checked="aspectRatioAutoDetectEnabled" size="small" class="aspect-ratio-auto-switch" />
                   <div class="aspect-ratio-auto-text">
                     <span class="aspect-ratio-auto-label">比例自动识别</span>
@@ -2972,18 +3361,30 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                     </a-tooltip>
                   </div>
                 </div>
-              </div>
-
-              <div class="generate-actions-block config-section action-config-section">
-                <div class="field-block">
-                  <label>图片数量：{{ numImages }}</label>
-                  <a-slider
-                    v-model:value="numImages"
-                    :min="1"
-                    :max="MAX_ACTIVE_GENERATION_IMAGES"
-                    :marks="{ 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10', 11: '11', 12: '12' }"
-                    class="num-slider"
-                  />
+                <div v-if="supportsCustomSize" class="aspect-ratio-auto-row custom-size-toggle-row">
+                  <a-switch v-model:checked="customSizeEnabled" size="small" class="aspect-ratio-auto-switch" @change="onCustomSizeToggle" />
+                  <div class="aspect-ratio-auto-text">
+                    <span class="aspect-ratio-auto-label">自定义分辨率</span>
+                    <a-tooltip
+                      overlay-class-name="custom-size-help-tooltip"
+                      placement="top"
+                      :get-popup-container="getBodyPopupContainer"
+                    >
+                      <template #title>
+                        <div class="custom-size-help-tip">
+                          <div>开启后可手动输入宽高：</div>
+                          <ul>
+                            <li>宽高须为 16 的倍数</li>
+                            <li>长短边比例不超过 3:1</li>
+                            <li>最大边长不超过 3840px</li>
+                          </ul>
+                        </div>
+                      </template>
+                      <button type="button" class="aspect-ratio-auto-help" aria-label="自定义分辨率说明">
+                        <QuestionCircleOutlined />
+                      </button>
+                    </a-tooltip>
+                  </div>
                 </div>
               </div>
               </template>
@@ -4133,7 +4534,7 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 }
 
 .settings-row-inline {
-  align-items: center;
+  align-items: stretch;
 }
 
 .setting-item {
@@ -4155,26 +4556,23 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
 }
 
 .setting-item-inline {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
+  flex: 1 1 0;
+  align-items: stretch;
+  gap: 10px;
 
   label {
     margin: 0;
-    min-width: auto;
-    flex: 0 0 auto;
-    white-space: nowrap;
+    white-space: normal;
   }
 
-  .flat-select {
-    flex: 1;
+  :deep(.option-grid-picker) {
+    display: flex;
+    width: 100%;
   }
 
-  .aspect-ratio-picker,
-  .option-grid-picker {
-    flex: 0 1 auto;
-    width: auto;
-    min-width: 0;
+  :deep(.option-grid-trigger) {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
@@ -5225,6 +5623,81 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   line-height: 1.7;
 }
 
+.custom-size-bottom-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.custom-size-height-col {
+  position: relative;
+}
+
+.custom-size-x {
+  position: absolute;
+  top: calc(1.4em + 10px);
+  left: 0;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  transform: translateX(calc(-50% - 8px));
+  color: var(--theme-title);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.custom-size-error {
+  color: #d4380d;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.setting-item-inline :deep(.custom-size-input.is-invalid.ant-input-number),
+.setting-item-inline :deep(.custom-size-input.ant-input-number-status-error) {
+  border-color: #d4380d !important;
+}
+
+.custom-size-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.custom-size-unit {
+  position: absolute;
+  top: 0;
+  right: 28px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.setting-item-inline :deep(.custom-size-input.ant-input-number) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  border-radius: 16px !important;
+}
+
+.setting-item-inline :deep(.custom-size-input.ant-input-number .ant-input-number-input) {
+  height: 40px;
+  padding: 0 44px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 40px;
+  ime-mode: disabled;
+}
+
 .aspect-ratio-auto-row {
   display: inline-flex;
   align-items: center;
@@ -5272,6 +5745,20 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.custom-size-help-tooltip .custom-size-help-tip {
+  text-align: left;
+  line-height: 1.6;
+}
+
+.custom-size-help-tooltip .custom-size-help-tip ul {
+  margin: 6px 0 0;
+  padding-left: 1.15em;
+}
+
+.custom-size-help-tooltip .custom-size-help-tip li {
+  list-style: disc;
 }
 
 .aspect-ratio-auto-help {
@@ -6181,33 +6668,33 @@ html:is([data-theme="dark"], [data-theme="midnight"]) .generate-page .result-mor
 
   .settings-row-inline {
     flex-direction: row;
-    align-items: center;
+    align-items: stretch;
     gap: 10px;
   }
 
   .settings-row-inline .setting-item-inline {
     flex: 1 1 0;
     min-width: 0;
-    justify-content: flex-start;
     gap: 6px;
   }
 
   .settings-row-inline .setting-item-inline label {
-    min-width: auto;
-    white-space: nowrap;
+    white-space: normal;
   }
 
-  .settings-row-inline .setting-item-inline .flat-select {
-    min-width: 0;
+  .custom-size-x {
+    top: calc(1.4em + 6px);
+    transform: translateX(calc(-50% - 5px));
   }
 
-  .settings-row-inline .setting-item-inline .flat-select :deep(.ant-select-selector) {
-    height: 42px !important;
-    padding: 0 10px !important;
+  .aspect-ratio-auto-row {
+    gap: 8px;
   }
 
-  .settings-row-inline .setting-item-inline .flat-select :deep(.ant-select-selection-item) {
-    line-height: 42px !important;
+  .custom-size-bottom-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
   }
 
   .generate-config-panel .upload-thumb,

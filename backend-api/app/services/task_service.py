@@ -1,11 +1,13 @@
 from datetime import timedelta
 import logging
 import json
+import re
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.config import settings
 from app.models.task import Task
 from app.models.image import Image
+from app.models.external_api_scene_binding import ExternalApiSceneBinding
 from app.models.user import User
 from app.models.credit_log import CreditLog
 from app.models.prompt_history import PromptHistory
@@ -150,6 +152,62 @@ def refund_task_credit_for_generation_failure_if_needed(
         },
     )
     return True
+
+
+CUSTOM_SIZE_PATTERN = re.compile(r"^(\d+)[xX](\d+)$")
+CUSTOM_SIZE_PIXEL_MULTIPLE = 16
+CUSTOM_SIZE_MAX_ASPECT_RATIO = 3
+
+
+def _validate_custom_size(db: Session, scene_key: str, custom_size: str) -> str:
+    normalized = (custom_size or "").strip()
+    if not normalized:
+        return ""
+    binding = (
+        db.query(ExternalApiSceneBinding)
+        .filter(
+            ExternalApiSceneBinding.scene_key == scene_key,
+            ExternalApiSceneBinding.is_deleted.is_(False),
+        )
+        .first()
+    )
+    if not binding or binding.hide_custom_size:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前模型不支持自定义分辨率")
+    match = CUSTOM_SIZE_PATTERN.fullmatch(normalized)
+    if not match:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="自定义分辨率格式应为 宽x高")
+    width, height = (int(match.group(1)), int(match.group(2)))
+    minimum = max(1, int(binding.custom_size_min or 256))
+    maximum = max(minimum, int(binding.custom_size_max or 3840))
+    step = max(1, int(binding.custom_size_step or 8))
+    if not (minimum <= width <= maximum and minimum <= height <= maximum):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"自定义分辨率宽高须在 {minimum}-{maximum} 之间",
+        )
+    if (width - minimum) % step != 0 or (height - minimum) % step != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"自定义分辨率宽高须按 {step} 递增",
+        )
+    if width % 16 != 0 or height % 16 != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="自定义分辨率宽高须为 16px 的倍数",
+        )
+    if max(width, height) > 3840:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="自定义分辨率最大边长不超过 3840px",
+        )
+    short_side = min(width, height)
+    long_side = max(width, height)
+    if short_side <= 0 or long_side / short_side > 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="自定义分辨率长短边比例不能超过 3:1",
+        )
+    return f"{width}x{height}"
 
 
 def _validate_task_create_payload(
@@ -310,6 +368,11 @@ def create_tasks(
         credit_account = get_user_credit_account(db, user.id, for_update=True)
         current_balance = int(credit_account.remain_credit or 0) if credit_account else 0
         scene_key = SCENE_INPAINT if mode == "inpaint" else model.strip()
+        normalized_custom_size = _validate_custom_size(db, scene_key, custom_size)
+        billing_resolution = "" if normalized_custom_size else resolution
+        if normalized_custom_size:
+            size = ""
+            resolution = ""
         task_logger.info(
             "task submission accepted",
             extra={
@@ -321,7 +384,7 @@ def create_tasks(
                 "prompt_length": len((prompt or "").strip()),
             },
         )
-        unit_cost = get_scene_credit_cost(db, scene_key, resolution=resolution)
+        unit_cost = get_scene_credit_cost(db, scene_key, resolution=billing_resolution)
         task_count = 1 if mode == "inpaint" else num_images
         task_count = ensure_task_submission_capacity(db, user_id=user_id, new_task_count=task_count)
         total_cost = task_count * unit_cost
@@ -343,7 +406,6 @@ def create_tasks(
         normalized_prompt = prompt.strip()
         normalized_model = model.strip()
         normalized_source = (source or "web").strip().lower() or "web"
-        normalized_custom_size = custom_size.strip()
         normalized_source_image = source_image.strip()
         normalized_mask_image = mask_image.strip()
         credit_log_description = "局部重绘 1 张图片" if mode == "inpaint" else "生成 1 张图片"

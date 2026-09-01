@@ -492,6 +492,7 @@ def _call_generation_api_once(
             "image_size": image_size,
             "custom_size": custom_size,
             "mapped_resolution": mapped_resolution,
+            "resolved_resolution": (custom_size or "").strip() or mapped_resolution,
             "generation_config": {},
             "mode": mode,
             "reference_image_count": 0,
