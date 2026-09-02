@@ -262,6 +262,17 @@ def _mark_task_request_started(task: Task) -> bool:
 def _mark_task_request_finished(task: Task) -> None:
     task.request_finished_at = now_local()
 
+
+def _mark_image_request_started(image: Image) -> None:
+    if image.request_started_at is None or image.request_finished_at is not None:
+        image.request_started_at = now_local()
+    image.request_finished_at = None
+
+
+def _mark_image_request_finished(image: Image) -> None:
+    if image.request_started_at is not None:
+        image.request_finished_at = now_local()
+
 def _read_file_as_base64(ref_url: str) -> tuple[str, str] | None:
     """Read a local or remote image and return (mime_type, base64_data)."""
     result = load_image_bytes(ref_url)
@@ -1125,6 +1136,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
             db.refresh(task)
             if _expire_processing_task(db, task, images):
                 return
+            _mark_image_request_started(image)
             if _mark_task_request_started(task):
                 db.commit()
                 db.refresh(task)
@@ -1149,6 +1161,7 @@ def _process_task(task_id: int, *, use_distributed_lock: bool = True):
                 mask_image=api_mask_image,
             )
             _mark_task_request_finished(task)
+            _mark_image_request_finished(image)
             attempts_to_record = call_result.attempts
 
             if call_result.result:
@@ -1278,6 +1291,7 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
 
         ref_urls = _parse_reference_images(task)
         task_mode = (task.mode or "generate").lower()
+        _mark_image_request_started(image)
         if _mark_task_request_started(task):
             db.commit()
             db.refresh(task)
@@ -1303,6 +1317,7 @@ def _process_single_image(image_id: int, *, use_distributed_lock: bool = True):
             mask_image=api_mask_image,
         )
         _mark_task_request_finished(task)
+        _mark_image_request_finished(image)
         attempts_to_record = call_result.attempts
 
         if call_result.result:

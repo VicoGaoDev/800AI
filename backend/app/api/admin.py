@@ -11,7 +11,7 @@ from app.schemas.admin import (
     UpdateWhitelistRequest, UpdateRemarkRequest, ResetPasswordRequest, StatsOut, AllocateCreditsRequest, ResetCreditsRequest, CreditLogOut,
     CreateRedeemKeysBatchRequest, RedeemKeyBatchOut, RedeemKeyOut, UpdateRedeemKeyStatusRequest, PaymentOrderAdminOut,
     AnalyticsSummaryOut, AnalyticsTimeseriesOut, AnalyticsBreakdownOut, AnalyticsRedeemRevenueOut,
-    ErrorAnalyticsOut, ErrorCategoryTimeseriesOut, ErrorTaskListOut, DailyReportTestOut,
+    ErrorAnalyticsOut, ErrorCategoryTimeseriesOut, ErrorTaskListOut, DailyReportTestOut, ApiAlertTestOut,
     AdminUserPromoDashboardOut,
 )
 from app.schemas.feedback import (
@@ -44,6 +44,7 @@ from app.services.feedback_service import (
     update_feedback,
 )
 from app.services.history_service import get_admin_history_cards, get_admin_history_detail, get_all_history
+from app.services.api_alert_service import ApiAlertRunResult, execute_api_alerts
 from app.services.daily_report_service import send_previous_day_report
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
@@ -663,3 +664,47 @@ def admin_test_daily_report_notify(
         "task_failed_count": stats.task_failed_count,
         "credit_consumed": stats.credit_consumed,
     }
+
+
+def _format_api_alert_result(result: ApiAlertRunResult) -> dict:
+    stats = result.stats
+    decision = result.decision
+    return {
+        "dry_run": result.dry_run,
+        "sent_per_api": result.sent_per_api,
+        "sent_overall": result.sent_overall,
+        "range_start": result.start_at,
+        "range_end": result.end_at,
+        "slot_start": result.slot_start,
+        "overall": {
+            "image_count": stats.overall_image_count,
+            "success_count": stats.overall_success_count,
+            "success_rate": stats.overall_success_rate,
+            "api_count": stats.api_count,
+            "would_alert": decision.overall_alert,
+        },
+        "apis": [
+            {
+                "api_config_id": api.api_config_id,
+                "api_config_name": api.api_config_name,
+                "image_count": api.image_count,
+                "success_count": api.success_count,
+                "success_rate": api.success_rate,
+                "avg_duration_seconds": api.avg_duration_seconds,
+                "would_alert": api.would_alert,
+                "alert_reasons": list(api.alert_reasons),
+            }
+            for api in decision.annotated_apis
+        ],
+    }
+
+
+@router.post("/notify/api-alert/test", response_model=ApiAlertTestOut)
+def admin_test_api_alert_notify(
+    send: bool = Query(False),
+    _user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    return _format_api_alert_result(
+        execute_api_alerts(db, send=send, claim_slot=False)
+    )

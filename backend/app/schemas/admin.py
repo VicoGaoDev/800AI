@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -269,6 +269,36 @@ class ErrorTaskItemOut(BaseModel):
 class ErrorTaskListOut(BaseModel):
     total: int
     items: list[ErrorTaskItemOut]
+
+
+class ApiAlertApiStatOut(BaseModel):
+    api_config_id: int | None = None
+    api_config_name: str
+    image_count: int
+    success_count: int
+    success_rate: float
+    avg_duration_seconds: float | None = None
+    would_alert: bool
+    alert_reasons: list[str] = Field(default_factory=list)
+
+
+class ApiAlertOverallOut(BaseModel):
+    image_count: int
+    success_count: int
+    success_rate: float
+    api_count: int
+    would_alert: bool
+
+
+class ApiAlertTestOut(BaseModel):
+    dry_run: bool
+    sent_per_api: bool
+    sent_overall: bool
+    range_start: datetime
+    range_end: datetime
+    slot_start: datetime
+    overall: ApiAlertOverallOut
+    apis: list[ApiAlertApiStatOut]
 
 
 class DailyReportTestOut(BaseModel):
