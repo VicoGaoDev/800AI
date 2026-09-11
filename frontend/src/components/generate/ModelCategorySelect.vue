@@ -50,6 +50,8 @@ const selectedOption = computed(() => (
   props.options.find((item) => item.value === props.modelValue) || null
 ));
 
+const modelCount = computed(() => props.options.length);
+
 const groupedCategories = computed(() => {
   const groups = new Map<number, {
     id: number;
@@ -314,6 +316,7 @@ onBeforeUnmount(() => {
         <span class="model-category-select-label">{{ selectedOption.label }}</span>
       </span>
       <span v-else class="model-category-select-placeholder">{{ loading ? "加载中..." : placeholder }}</span>
+      <span v-if="modelCount > 0" class="model-category-select-count">共 {{ modelCount }} 个模型</span>
       <DownOutlined class="model-category-select-arrow" />
     </button>
 
@@ -469,6 +472,16 @@ onBeforeUnmount(() => {
 .model-category-select-placeholder {
   color: var(--text-muted, #8c8c8c);
   font-weight: 400;
+}
+
+.model-category-select-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-secondary, #8c7458);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .model-category-select-arrow {
@@ -637,5 +650,11 @@ onBeforeUnmount(() => {
   font-size: 14px;
   font-weight: 700;
   color: var(--theme-title);
+}
+
+.is-flat .model-category-select-count {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 </style>
