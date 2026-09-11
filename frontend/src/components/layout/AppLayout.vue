@@ -59,6 +59,7 @@ import {
   AccountBookOutlined,
   CheckOutlined,
   ShareAltOutlined,
+  TagsOutlined,
 } from "@ant-design/icons-vue";
 
 const router = useRouter();
@@ -105,6 +106,7 @@ const routeOrder = new Map<string, number>([
   ["/admin/system-messages", 27],
   ["/admin/cos-config", 28],
   ["/admin/external-api-configs", 29],
+  ["/admin/generation-scene-categories", 29.5],
 ]);
 
 const currentTheme = ref<AppThemeName>(getCurrentTheme());
@@ -152,6 +154,7 @@ const adminMenuItems = computed(() =>
     { key: "/admin/system-messages", label: "系统邮件", icon: MailOutlined, superAdminOnly: false },
     { key: "/admin/cos-config", label: "COS 配置", icon: CloudUploadOutlined, superAdminOnly: true },
     { key: "/admin/external-api-configs", label: "接口管理", icon: KeyOutlined, superAdminOnly: true },
+    { key: "/admin/generation-scene-categories", label: "生图分类", icon: TagsOutlined, superAdminOnly: true },
   ].filter((item) => !item.superAdminOnly || isSuperAdmin.value)
 );
 const adminMenuGroups = computed(() =>
@@ -178,7 +181,7 @@ const adminMenuGroups = computed(() =>
       key: "admin-third-party",
       label: "第三方管理",
       icon: KeyOutlined,
-      itemKeys: ["/admin/general-settings", "/admin/cos-config", "/admin/external-api-configs"],
+      itemKeys: ["/admin/general-settings", "/admin/cos-config", "/admin/external-api-configs", "/admin/generation-scene-categories"],
     },
   ].map((group) => ({
     ...group,

@@ -13,6 +13,7 @@ import {
   type TemplateFromTaskPayload,
 } from "@/api/templates";
 import { uploadReferenceImage } from "@/api/upload";
+import ModelCategorySelect from "@/components/generate/ModelCategorySelect.vue";
 import type { CreativeTemplate, GenerationModelOption, TemplateTag } from "@/types";
 
 type DialogMode = "create" | "edit" | "fromTask";
@@ -75,6 +76,17 @@ const resolutionOptions = [
 ];
 
 const selectedModelOption = computed(() => modelOptions.value.find((item) => item.model_key === form.model) || null);
+const generationModelSelectOptions = computed(() => (
+  modelOptions.value.map((model) => ({
+    value: model.model_key,
+    label: model.model_label,
+    description: model.model_description,
+    sortOrder: model.sort_order,
+    categoryId: model.category_id,
+    categoryName: model.category_name,
+    categorySortOrder: model.category_sort_order,
+  }))
+));
 const hideResolution = computed(() => !!selectedModelOption.value?.hide_resolution);
 const hideCustomSize = computed(() => !!selectedModelOption.value?.hide_custom_size);
 const customSizeOptions = computed(() => (
@@ -333,11 +345,12 @@ defineExpose({
 
       <div class="form-grid">
         <a-form-item label="模型">
-          <a-select v-model:value="form.model" class="warm-select" placeholder="请选择模型">
-            <a-select-option v-for="model in modelOptions" :key="model.model_key" :value="model.model_key">
-              {{ model.model_label }}
-            </a-select-option>
-          </a-select>
+          <ModelCategorySelect
+            v-model="form.model"
+            class="warm-select"
+            :options="generationModelSelectOptions"
+            placeholder="请选择模型"
+          />
         </a-form-item>
         <a-form-item label="宽高比">
           <a-select v-model:value="form.size" class="warm-select" :options="sizeOptions" />

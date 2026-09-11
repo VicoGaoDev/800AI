@@ -224,6 +224,12 @@ const router = createRouter({
           meta: { requiresSuperAdmin: true },
           component: () => import("@/views/admin/ExternalApiConfigView.vue"),
         },
+        {
+          path: "admin/generation-scene-categories",
+          name: "GenerationSceneCategoryManage",
+          meta: { requiresSuperAdmin: true },
+          component: () => import("@/views/admin/GenerationSceneCategoryView.vue"),
+        },
       ],
     },
   ],

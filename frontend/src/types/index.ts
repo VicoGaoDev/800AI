@@ -398,6 +398,31 @@ export interface PromptOptimizeStylePayload {
   is_default: boolean;
 }
 
+export type GenerationSceneCategoryStatus = "enabled" | "disabled";
+export type GenerationSceneCategoryType = "generate" | "image_edit";
+
+export interface GenerationSceneCategory {
+  id: number;
+  name: string;
+  description: string;
+  scene_type: GenerationSceneCategoryType;
+  scene_keys: string[];
+  sort_order: number;
+  status: GenerationSceneCategoryStatus;
+  is_deleted?: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface GenerationSceneCategoryPayload {
+  name: string;
+  description: string;
+  scene_type: GenerationSceneCategoryType;
+  scene_keys: string[];
+  sort_order: number;
+  status: GenerationSceneCategoryStatus;
+}
+
 export interface PublicPromptOptimizeStyle {
   id: number;
   name: string;
@@ -1150,6 +1175,9 @@ export interface GenerationModelOption {
   aspect_ratio_options: SceneOptionItem[];
   image_size_options: SceneOptionItem[];
   custom_size_options: SceneOptionItem[];
+  category_id?: number | null;
+  category_name?: string | null;
+  category_sort_order?: number | null;
 }
 
 export interface TaskSceneConfig {
@@ -1172,6 +1200,9 @@ export interface TaskSceneConfig {
   aspect_ratio_options: SceneOptionItem[];
   image_size_options: SceneOptionItem[];
   custom_size_options: SceneOptionItem[];
+  category_id?: number | null;
+  category_name?: string | null;
+  category_sort_order?: number | null;
 }
 
 export type UploadPurpose = "ref" | "source" | "mask" | "reverse" | "misc" | "template";

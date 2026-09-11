@@ -108,6 +108,7 @@ def on_startup():
         _ensure_task_api_attempt_schema()
         _ensure_external_api_config_required_columns()
         _ensure_scene_binding_required_columns()
+        _ensure_generation_scene_category_schema()
         _ensure_template_required_columns()
         _ensure_feedback_schema()
         _ensure_system_message_schema()
@@ -1267,6 +1268,33 @@ def _ensure_external_api_config_required_columns():
         )
 
 
+def _ensure_generation_scene_category_schema():
+    inspector = inspect(engine)
+    if "generation_scene_categories" not in inspector.get_table_names():
+        from app.models.generation_scene_category import GenerationSceneCategory
+
+        GenerationSceneCategory.__table__.create(bind=engine)
+        return
+
+    category_columns = {col["name"] for col in inspector.get_columns("generation_scene_categories")}
+    category_indexes = {index["name"] for index in inspector.get_indexes("generation_scene_categories")}
+    with engine.begin() as conn:
+        if "scene_type" not in category_columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE generation_scene_categories "
+                    "ADD COLUMN scene_type VARCHAR(20) NOT NULL DEFAULT 'generate'"
+                )
+            )
+        if "idx_generation_scene_categories_scene_type" not in category_indexes:
+            conn.execute(
+                text(
+                    "CREATE INDEX idx_generation_scene_categories_scene_type "
+                    "ON generation_scene_categories (scene_type, is_deleted)"
+                )
+            )
+
+
 def _ensure_scene_binding_required_columns():
     inspector = inspect(engine)
     if "external_api_scene_bindings" not in inspector.get_table_names():
@@ -1841,7 +1869,7 @@ upload_path = Path(settings.UPLOAD_DIR)
 upload_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
-from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, prompt_optimize, prompt_optimize_styles, external_api_config, feedback, system_messages, user_api_keys, payment, user_assets, user_prompts  # noqa: E402
+from app.api import auth, tasks, images, history, admin, upload, api_key, templates, prompt_reverse, prompt_optimize, prompt_optimize_styles, generation_scene_categories, external_api_config, feedback, system_messages, user_api_keys, payment, user_assets, user_prompts  # noqa: E402
 app.include_router(auth.router)
 app.include_router(user_api_keys.router)
 app.include_router(templates.router)
@@ -1866,6 +1894,7 @@ app.include_router(prompt_reverse.router)
 app.include_router(prompt_optimize.router)
 app.include_router(prompt_optimize_styles.admin_router)
 app.include_router(prompt_optimize_styles.public_router)
+app.include_router(generation_scene_categories.admin_router)
 app.include_router(external_api_config.router)
 app.include_router(external_api_config.scene_router)
 app.include_router(external_api_config.public_router)

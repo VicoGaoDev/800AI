@@ -48,6 +48,7 @@ import { getMe } from "@/api/auth";
 import { getMyCompletedUnreadFeedbackCount } from "@/api/feedback";
 import { useAuthStore } from "@/stores/auth";
 import AspectRatioPicker from "@/components/generate/AspectRatioPicker.vue";
+import ModelCategorySelect from "@/components/generate/ModelCategorySelect.vue";
 import GenerateCameraPicker from "@/components/generate/GenerateCameraPicker.vue";
 import GenerateStylePicker from "@/components/generate/GenerateStylePicker.vue";
 import GenerateStyleTags from "@/components/generate/GenerateStyleTags.vue";
@@ -342,6 +343,9 @@ function toGenerationModelOption(scene: TaskSceneConfig): GenerationModelOption 
     aspect_ratio_options: scene.aspect_ratio_options,
     image_size_options: scene.image_size_options,
     custom_size_options: scene.custom_size_options,
+    category_id: scene.category_id ?? null,
+    category_name: scene.category_name ?? null,
+    category_sort_order: scene.category_sort_order ?? null,
   };
 }
 
@@ -376,6 +380,17 @@ const imageEditModels = computed(() => {
   return models.length ? models : textGenerateModels.value;
 });
 const generationModels = computed(() => (isImageEditMode.value ? imageEditModels.value : textGenerateModels.value));
+const generationModelSelectOptions = computed(() => (
+  generationModels.value.map((model) => ({
+    value: model.model_key,
+    label: model.model_label,
+    description: model.model_description,
+    sortOrder: model.sort_order,
+    categoryId: model.category_id,
+    categoryName: model.category_name,
+    categorySortOrder: model.category_sort_order,
+  }))
+));
 const hasBlockedUploads = computed(() => {
   if (generateMode.value === "inpaint") {
     return !!sourcePreviewUrl.value && !sourceImageUrl.value;
@@ -2807,19 +2822,12 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                       </div>
                     </div>
                   </div>
-                  <a-select
-                    v-model:value="selectedModel"
-                    :bordered="false"
-                    class="flat-select"
+                  <ModelCategorySelect
+                    v-model="selectedModel"
+                    :options="generationModelSelectOptions"
+                    variant="flat"
                     popup-class-name="generate-dropdown"
-                  >
-                    <a-select-option v-for="model in generationModels" :key="model.model_key" :value="model.model_key">
-                      <div class="model-option">
-                        <div class="model-option-label">{{ model.model_label }}</div>
-                        <div v-if="model.model_description" class="model-option-desc">{{ model.model_description }}</div>
-                      </div>
-                    </a-select-option>
-                  </a-select>
+                  />
                 </div>
               </div>
 
@@ -3127,19 +3135,12 @@ watch(() => auth.isLoggedIn, (isLoggedIn) => {
                       </div>
                     </div>
                   </div>
-                  <a-select
-                    v-model:value="selectedModel"
-                    :bordered="false"
-                    class="flat-select"
+                  <ModelCategorySelect
+                    v-model="selectedModel"
+                    :options="generationModelSelectOptions"
+                    variant="flat"
                     popup-class-name="generate-dropdown"
-                  >
-                    <a-select-option v-for="model in generationModels" :key="model.model_key" :value="model.model_key">
-                      <div class="model-option">
-                        <div class="model-option-label">{{ model.model_label }}</div>
-                        <div v-if="model.model_description" class="model-option-desc">{{ model.model_description }}</div>
-                      </div>
-                    </a-select-option>
-                  </a-select>
+                  />
                 </div>
               </div>
 
